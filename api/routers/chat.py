@@ -1,0 +1,104 @@
+"""
+api/routers/chat.py
+───────────────────
+POST /api/v1/chat   — Main agent endpoint with multi-turn session support.
+GET  /api/v1/health — Liveness check.
+"""
+
+import logging
+from typing import Any
+
+from fastapi import APIRouter, Request, HTTPException
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+from api.models import ChatRequest, ChatResponse, HealthResponse
+
+log = logging.getLogger(__name__)
+router = APIRouter()
+
+
+def _extract_tool_calls(messages: list) -> list[str]:
+    """Return tool names invoked in this conversation turn."""
+    names: list[str] = []
+    for msg in messages:
+        if isinstance(msg, ToolMessage):
+            # Walk back to find the AIMessage that triggered this tool
+            pass
+        if isinstance(msg, AIMessage):
+            for tc in getattr(msg, "tool_calls", []):
+                if tc["name"] not in names:
+                    names.append(tc["name"])
+    return names
+
+
+@router.post("/chat", response_model=ChatResponse, summary="Send a message to the agent")
+def chat(request: Request, body: ChatRequest) -> ChatResponse:
+    """
+    Send a message to ProcureGuard AI and receive a response.
+
+    - **session_id**: Unique ID to maintain conversation history across calls.
+    - **message**: Your question or command in natural language.
+    - **role**: Your role (`requester`, `approver`, `finance`, `admin`).
+
+    The agent will use the appropriate tools, enforce compliance guard rules,
+    and return a structured response including any risk flags raised.
+    """
+    graph:         Any = request.app.state.graph
+    session_store: Any = request.app.state.session_store
+
+    # Get or create session state
+    state = session_store.get_or_create(body.session_id, role=body.role)
+
+    # Track message count before invocation (to extract new messages only)
+    prev_count = len(state["messages"])
+
+    # Append new user message and invoke graph
+    state["messages"] = list(state["messages"]) + [HumanMessage(content=body.message)]
+
+    try:
+        state = graph.invoke(state)
+    except Exception as exc:
+        log.exception("Agent invocation failed for session '%s'.", body.session_id)
+        raise HTTPException(status_code=500, detail=f"Agent error: {str(exc)}")
+
+    # Persist updated state
+    session_store.update(body.session_id, state)
+
+    # Extract new messages from this turn
+    new_messages = list(state["messages"])[prev_count:]
+
+    # Get last AI reply
+    reply = ""
+    for msg in reversed(state["messages"]):
+        if isinstance(msg, AIMessage):
+            reply = msg.content
+            break
+
+    # Collect tool calls made in this turn
+    tool_calls_made = _extract_tool_calls(new_messages)
+
+    # Collect risk flags added this turn
+    risk_flags: list[str] = list(state.get("risk_flags", []))
+
+    log.info(
+        "Chat [session=%s role=%s tools=%s flags=%d] → %d chars reply",
+        body.session_id, body.role, tool_calls_made, len(risk_flags), len(reply),
+    )
+
+    return ChatResponse(
+        session_id=body.session_id,
+        reply=reply or "(No response generated.)",
+        risk_flags=risk_flags,
+        tool_calls_made=tool_calls_made,
+    )
+
+
+@router.get("/health", response_model=HealthResponse, summary="Server health check")
+def health(request: Request) -> HealthResponse:
+    """Returns server status, loaded model name, DB path, and active session count."""
+    return HealthResponse(
+        status="ok",
+        model_name=request.app.state.model_name,
+        db_path=request.app.state.db_path,
+        active_sessions=request.app.state.session_store.active_count(),
+    )

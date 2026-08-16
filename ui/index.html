@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProcureGuard AI</title>
+  <meta name="description" content="AI-powered procurement management with real-time compliance guard rules." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & Variables ─────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:        #0a0f1e;
+      --charcoal:    #111827;
+      --slate:       #1e293b;
+      --slate-light: #263347;
+      --border:      #2d3748;
+      --indigo:      #6366f1;
+      --indigo-dim:  #4f46e5;
+      --indigo-glow: rgba(99,102,241,.25);
+      --emerald:     #10b981;
+      --emerald-dim: rgba(16,185,129,.15);
+      --amber:       #f59e0b;
+      --amber-dim:   rgba(245,158,11,.15);
+      --red:         #ef4444;
+      --red-dim:     rgba(239,68,68,.15);
+      --gray:        #64748b;
+      --text:        #e2e8f0;
+      --text-muted:  #94a3b8;
+      --radius:      10px;
+      --transition:  0.2s ease;
+    }
+
+    html, body { height: 100%; font-family: 'Inter', sans-serif; background: var(--charcoal); color: var(--text); overflow: hidden; }
+
+    /* ── Layout ────────────────────────────────────────────────────────────── */
+    #app {
+      display: grid;
+      grid-template-columns: 220px 1fr 280px;
+      height: 100vh;
+    }
+
+    /* ── Left Sidebar ──────────────────────────────────────────────────────── */
+    #sidebar {
+      background: var(--navy);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .sidebar-logo {
+      padding: 20px 18px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, var(--indigo), #8b5cf6);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+      box-shadow: 0 0 16px var(--indigo-glow);
+    }
+
+    .logo-text { font-size: 14px; font-weight: 700; line-height: 1.2; }
+    .logo-text span { color: var(--indigo); }
+
+    .sidebar-nav { padding: 12px 8px; flex: 1; }
+
+    .nav-label {
+      font-size: 10px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .08em;
+      padding: 4px 10px 8px;
+    }
+
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border-radius: var(--radius);
+      cursor: pointer; font-size: 13.5px; font-weight: 500;
+      color: var(--text-muted); transition: all var(--transition);
+      margin-bottom: 2px; user-select: none;
+    }
+    .nav-item:hover { background: var(--slate); color: var(--text); }
+    .nav-item.active {
+      background: linear-gradient(90deg, rgba(99,102,241,.18), rgba(99,102,241,.06));
+      color: var(--indigo);
+      border-left: 2px solid var(--indigo);
+      padding-left: 10px;
+    }
+    .nav-item .nav-icon { font-size: 16px; width: 20px; text-align: center; }
+
+    .sidebar-footer {
+      padding: 14px 18px;
+      border-top: 1px solid var(--border);
+    }
+
+    .status-badge {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--emerald);
+      box-shadow: 0 0 0 0 rgba(16,185,129,.5);
+      animation: pulse-dot 2s infinite;
+    }
+    .status-dot.offline { background: var(--red); animation: none; }
+
+    @keyframes pulse-dot {
+      0%   { box-shadow: 0 0 0 0 rgba(16,185,129,.5); }
+      70%  { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+      100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+    }
+
+    /* ── Center Panel ──────────────────────────────────────────────────────── */
+    #center {
+      display: flex; flex-direction: column;
+      background: var(--charcoal);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(17,24,39,.8);
+      backdrop-filter: blur(8px);
+    }
+
+    .panel-title { font-size: 16px; font-weight: 600; }
+    .panel-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Role selector */
+    .role-selector {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--slate); border-radius: 20px;
+      padding: 4px 6px;
+    }
+    .role-btn {
+      padding: 4px 10px; border-radius: 14px; font-size: 11.5px;
+      font-weight: 500; cursor: pointer; border: none;
+      background: transparent; color: var(--text-muted);
+      transition: all var(--transition); font-family: 'Inter', sans-serif;
+    }
+    .role-btn.active { background: var(--indigo); color: #fff; }
+
+    /* ── Chat View ─────────────────────────────────────────────────────────── */
+    #chat-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    #messages {
+      flex: 1; overflow-y: auto; padding: 20px 24px;
+      display: flex; flex-direction: column; gap: 16px;
+      scroll-behavior: smooth;
+    }
+    #messages::-webkit-scrollbar { width: 4px; }
+    #messages::-webkit-scrollbar-track { background: transparent; }
+    #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .msg-row {
+      display: flex; gap: 10px; align-items: flex-end;
+      animation: msg-in .25s ease both;
+    }
+    .msg-row.user { flex-direction: row-reverse; }
+
+    @keyframes msg-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--slate-light); display: flex;
+      align-items: center; justify-content: center;
+      font-size: 14px; flex-shrink: 0;
+    }
+    .msg-avatar.user-av { background: var(--indigo-dim); }
+
+    .msg-content { max-width: 72%; display: flex; flex-direction: column; gap: 4px; }
+    .msg-row.user .msg-content { align-items: flex-end; }
+
+    .msg-bubble {
+      padding: 10px 14px; border-radius: 14px;
+      font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+    }
+    .msg-row.user .msg-bubble {
+      background: linear-gradient(135deg, var(--indigo), var(--indigo-dim));
+      color: #fff; border-bottom-right-radius: 4px;
+    }
+    .msg-row.agent .msg-bubble {
+      background: var(--slate); color: var(--text);
+      border-bottom-left-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    .msg-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+    .tool-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 500;
+      background: rgba(99,102,241,.15); color: var(--indigo);
+      border: 1px solid rgba(99,102,241,.3);
+    }
+
+    .risk-banner {
+      margin: 4px 24px; padding: 10px 14px;
+      background: var(--amber-dim); border: 1px solid rgba(245,158,11,.35);
+      border-radius: var(--radius); display: flex; gap: 10px; align-items: flex-start;
+      animation: msg-in .25s ease both;
+    }
+    .risk-banner-icon { font-size: 14px; }
+    .risk-banner-text { font-size: 12px; color: var(--amber); line-height: 1.5; }
+
+    /* Typing indicator */
+    #typing {
+      display: none; padding: 0 24px 12px;
+      align-items: center; gap: 10px;
+    }
+    #typing .msg-avatar { opacity: .7; }
+    .typing-dots { display: flex; gap: 4px; }
+    .typing-dots span {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--text-muted); animation: dot-bounce .9s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .15s; }
+    .typing-dots span:nth-child(3) { animation-delay: .3s; }
+    @keyframes dot-bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: .5; }
+      40%            { transform: translateY(-5px); opacity: 1; }
+    }
+
+    /* Input bar */
+    #input-bar {
+      padding: 14px 24px 18px;
+      border-top: 1px solid var(--border);
+      background: rgba(17,24,39,.6);
+    }
+    .input-wrapper {
+      display: flex; gap: 10px; align-items: flex-end;
+      background: var(--slate); border: 1px solid var(--border);
+      border-radius: 12px; padding: 8px 12px;
+      transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    .input-wrapper:focus-within {
+      border-color: var(--indigo);
+      box-shadow: 0 0 0 3px var(--indigo-glow);
+    }
+    #msg-input {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-family: 'Inter', sans-serif; font-size: 13.5px;
+      resize: none; max-height: 120px; line-height: 1.5;
+    }
+    #msg-input::placeholder { color: var(--text-muted); }
+    #send-btn {
+      width: 34px; height: 34px; border-radius: 8px;
+      background: var(--indigo); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all var(--transition); flex-shrink: 0;
+      box-shadow: 0 0 12px var(--indigo-glow);
+    }
+    #send-btn:hover { background: #7c7ff5; transform: scale(1.05); }
+    #send-btn:active { transform: scale(.96); }
+    #send-btn svg { width: 16px; height: 16px; fill: #fff; }
+    #send-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+    .input-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; padding-left: 2px; }
+
+    /* Empty chat state */
+    .chat-empty {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      color: var(--text-muted); padding: 40px;
+    }
+    .chat-empty-icon { font-size: 42px; }
+    .chat-empty-title { font-size: 16px; font-weight: 600; color: var(--text); }
+    .chat-empty-desc { font-size: 13px; text-align: center; max-width: 340px; line-height: 1.6; }
+    .suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
+    .suggestion-chip {
+      padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--slate);
+      color: var(--text-muted); transition: all var(--transition);
+    }
+    .suggestion-chip:hover { border-color: var(--indigo); color: var(--indigo); background: rgba(99,102,241,.08); }
+
+    /* ── Data Table View ───────────────────────────────────────────────────── */
+    #table-view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+
+    .table-toolbar {
+      padding: 14px 24px; display: flex; gap: 10px; align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+    .filter-input {
+      flex: 1; background: var(--slate); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 12px; color: var(--text);
+      font-size: 13px; font-family: 'Inter', sans-serif; outline: none;
+      transition: border-color var(--transition);
+    }
+    .filter-input:focus { border-color: var(--indigo); }
+    .filter-input::placeholder { color: var(--text-muted); }
+    .filter-select {
+      background: var(--slate); border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 10px; color: var(--text);
+      font-size: 12.5px; font-family: 'Inter', sans-serif; outline: none; cursor: pointer;
+    }
+
+    .table-wrap { flex: 1; overflow-y: auto; padding: 16px 24px; }
+    .table-wrap::-webkit-scrollbar { width: 4px; }
+    .table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+      text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .06em;
+      color: var(--text-muted); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--charcoal);
+    }
+    tbody tr {
+      border-bottom: 1px solid rgba(45,55,72,.5);
+      transition: background var(--transition);
+    }
+    tbody tr:hover { background: rgba(255,255,255,.02); }
+    tbody td { padding: 11px 12px; color: var(--text); vertical-align: middle; }
+    .td-muted { color: var(--text-muted); font-size: 12px; }
+    .td-amount { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    /* Status badges */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+    }
+    .badge-active, .badge-approved, .badge-paid {
+      background: var(--emerald-dim); color: var(--emerald);
+    }
+    .badge-pending { background: rgba(99,102,241,.12); color: var(--indigo); }
+    .badge-draft   { background: rgba(100,116,139,.15); color: var(--gray); }
+    .badge-rejected, .badge-blacklisted, .badge-cancelled {
+      background: var(--red-dim); color: var(--red);
+    }
+    .badge-inactive   { background: rgba(100,116,139,.15); color: var(--gray); }
+    .badge-disputed   { background: var(--amber-dim); color: var(--amber); }
+    .badge-closed     { background: rgba(100,116,139,.12); color: var(--gray); }
+
+    /* ── Right Stats Sidebar ───────────────────────────────────────────────── */
+    #stats {
+      background: var(--slate);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow-y: auto; overflow-x: hidden;
+    }
+    #stats::-webkit-scrollbar { width: 4px; }
+    #stats::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .stats-header {
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .stats-title { font-size: 13px; font-weight: 600; }
+    .stats-refresh {
+      font-size: 11px; color: var(--text-muted); cursor: pointer;
+      background: none; border: none; color: var(--text-muted);
+      font-family: 'Inter', sans-serif; transition: color var(--transition);
+    }
+    .stats-refresh:hover { color: var(--indigo); }
+
+    .stat-card {
+      margin: 10px 12px 0;
+      background: rgba(10,15,30,.4);
+      border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px;
+      transition: border-color var(--transition);
+    }
+    .stat-card:hover { border-color: rgba(99,102,241,.3); }
+
+    .stat-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .stat-card-label { font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+    .stat-card-total { font-size: 11px; color: var(--text-muted); }
+
+    .stat-number { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 10px; }
+
+    /* Dot breakdown */
+    .dot-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .dot-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .dot-emerald { background: var(--emerald); }
+    .dot-gray    { background: var(--gray); }
+    .dot-red     { background: var(--red); }
+    .dot-indigo  { background: var(--indigo); }
+    .dot-amber   { background: var(--amber); }
+
+    /* Segmented bar */
+    .seg-bar {
+      height: 6px; border-radius: 3px; overflow: hidden;
+      display: flex; gap: 2px; margin-bottom: 8px;
+    }
+    .seg { border-radius: 3px; transition: flex var(--transition); min-width: 4px; }
+    .seg-emerald { background: var(--emerald); }
+    .seg-indigo  { background: var(--indigo); }
+    .seg-gray    { background: var(--gray); }
+    .seg-red     { background: var(--red); }
+    .seg-amber   { background: var(--amber); }
+
+    /* Risk flags */
+    .risk-card {
+      margin: 10px 12px 0;
+      background: var(--amber-dim);
+      border: 1px solid rgba(245,158,11,.25);
+      border-radius: var(--radius); padding: 12px;
+    }
+    .risk-card-header {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11.5px; font-weight: 600; color: var(--amber);
+      margin-bottom: 8px;
+    }
+    .risk-flag-item {
+      font-size: 11.5px; color: var(--amber);
+      line-height: 1.5; padding: 4px 0;
+      border-bottom: 1px solid rgba(245,158,11,.12);
+    }
+    .risk-flag-item:last-child { border-bottom: none; padding-bottom: 0; }
+
+    .no-flags {
+      font-size: 11.5px; color: var(--text-muted); text-align: center;
+      padding: 8px 0;
+    }
+
+    .stats-footer { padding: 12px 14px; margin-top: auto; }
+    .last-updated { font-size: 10.5px; color: var(--text-muted); text-align: center; }
+
+    /* ── Loading shimmer ───────────────────────────────────────────────────── */
+    .shimmer {
+      background: linear-gradient(90deg, var(--slate) 25%, var(--slate-light) 50%, var(--slate) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 4px; height: 14px;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ── Misc ──────────────────────────────────────────────────────────────── */
+    .empty-table {
+      text-align: center; color: var(--text-muted); padding: 48px 20px; font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══ LEFT SIDEBAR ════════════════════════════════════════════════════════ -->
+  <aside id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">🛡️</div>
+      <div class="logo-text">Procure<span>Guard</span> AI</div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-label">Workspace</div>
+      <div class="nav-item active" id="nav-chat" onclick="switchView('chat')">
+        <span class="nav-icon">💬</span> Chat
+      </div>
+      <div class="nav-item" id="nav-vendors" onclick="switchView('vendors')">
+        <span class="nav-icon">🏢</span> Vendors
+      </div>
+      <div class="nav-item" id="nav-pos" onclick="switchView('pos')">
+        <span class="nav-icon">📋</span> Purchase Orders
+      </div>
+      <div class="nav-item" id="nav-invoices" onclick="switchView('invoices')">
+        <span class="nav-icon">🧾</span> Invoices
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="status-badge">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-label">Agent Online</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══ CENTER PANEL ════════════════════════════════════════════════════════ -->
+  <main id="center">
+
+    <!-- Panel Header -->
+    <div class="panel-header">
+      <div>
+        <div class="panel-title" id="panel-title">AI Procurement Assistant</div>
+        <div class="panel-subtitle" id="panel-subtitle">Multi-turn agent with compliance guard rules</div>
+      </div>
+      <div class="role-selector" id="role-selector">
+        <button class="role-btn active" id="role-requester" onclick="setRole('requester')">Requester</button>
+        <button class="role-btn" id="role-approver"  onclick="setRole('approver')">Approver</button>
+        <button class="role-btn" id="role-finance"   onclick="setRole('finance')">Finance</button>
+        <button class="role-btn" id="role-admin"     onclick="setRole('admin')">Admin</button>
+      </div>
+    </div>
+
+    <!-- ── Chat View ─────────────────────────────────────────────────────── -->
+    <div id="chat-view">
+
+      <!-- Empty state -->
+      <div class="chat-empty" id="chat-empty">
+        <div class="chat-empty-icon">🛡️</div>
+        <div class="chat-empty-title">ProcureGuard AI</div>
+        <div class="chat-empty-desc">
+          Ask me about vendors, purchase orders, and invoices. I'll enforce
+          compliance rules automatically.
+        </div>
+        <div class="suggestion-chips">
+          <div class="suggestion-chip" onclick="sendSuggestion('Look up vendor Acme Corp')">Look up Acme Corp</div>
+          <div class="suggestion-chip" onclick="sendSuggestion('Show me the risk score for TechSupply Inc')">Risk score: TechSupply</div>
+          <div class="suggestion-chip" onclick="sendSuggestion('Approve PO-100002 for manager@company.com')">Approve PO-100002</div>
+          <div class="suggestion-chip" onclick="sendSuggestion('Check invoice INV-2025-003 status')">Invoice INV-2025-003</div>
+          <div class="suggestion-chip" onclick="sendSuggestion('Flag invoice INV-2025-003 as suspicious, amount mismatch')">Flag suspicious invoice</div>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div id="messages" style="display:none;"></div>
+
+      <!-- Typing indicator -->
+      <div id="typing">
+        <div class="msg-avatar">🤖</div>
+        <div class="typing-dots">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div id="input-bar">
+        <div class="input-wrapper">
+          <textarea
+            id="msg-input"
+            placeholder="Ask ProcureGuard…"
+            rows="1"
+            onkeydown="handleKey(event)"
+            oninput="autoResize(this)"
+          ></textarea>
+          <button id="send-btn" onclick="sendMessage()" title="Send (Ctrl+Enter)">
+            <svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+          </button>
+        </div>
+        <div class="input-hint">Ctrl+Enter to send &nbsp;·&nbsp; Session: <span id="session-display"></span></div>
+      </div>
+    </div>
+
+    <!-- ── Table View ─────────────────────────────────────────────────────── -->
+    <div id="table-view">
+      <div class="table-toolbar">
+        <input class="filter-input" id="table-filter" placeholder="Search…" oninput="filterTable()" />
+        <select class="filter-select" id="status-filter" onchange="filterTable()">
+          <option value="">All statuses</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="data-table">
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <div class="empty-table" id="table-empty" style="display:none;">No records found.</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ══ RIGHT STATS SIDEBAR ════════════════════════════════════════════════ -->
+  <aside id="stats">
+    <div class="stats-header">
+      <span class="stats-title">Live Overview</span>
+      <button class="stats-refresh" onclick="refreshStats()">↻ Refresh</button>
+    </div>
+
+    <!-- Vendors card -->
+    <div class="stat-card" id="card-vendors">
+      <div class="stat-card-header">
+        <span class="stat-card-label">🏢 Vendors</span>
+        <span class="stat-card-total" id="vendor-total">Total</span>
+      </div>
+      <div class="stat-number" id="vendor-count"><div class="shimmer" style="width:40px"></div></div>
+      <div class="dot-row" id="vendor-dots"></div>
+    </div>
+
+    <!-- Purchase Orders card -->
+    <div class="stat-card" id="card-pos">
+      <div class="stat-card-header">
+        <span class="stat-card-label">📋 Purchase Orders</span>
+        <span class="stat-card-total" id="po-total">Total</span>
+      </div>
+      <div class="stat-number" id="po-count"><div class="shimmer" style="width:40px"></div></div>
+      <div class="seg-bar" id="po-bar"></div>
+      <div class="dot-row" id="po-dots"></div>
+    </div>
+
+    <!-- Invoices card -->
+    <div class="stat-card" id="card-invoices">
+      <div class="stat-card-header">
+        <span class="stat-card-label">🧾 Invoices</span>
+        <span class="stat-card-total" id="inv-total">Total</span>
+      </div>
+      <div class="stat-number" id="inv-count"><div class="shimmer" style="width:40px"></div></div>
+      <div class="dot-row" id="inv-dots"></div>
+    </div>
+
+    <!-- Risk Flags card -->
+    <div class="risk-card" id="risk-card">
+      <div class="risk-card-header">⚠️ Risk Flags</div>
+      <div id="risk-list"><div class="no-flags">No flags this session</div></div>
+    </div>
+
+    <div class="stats-footer">
+      <div class="last-updated" id="last-updated">Initialising…</div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+/* ── State ─────────────────────────────────────────────────────────────────── */
+const API = '/api/v1';
+const sessionId = crypto.randomUUID();
+let currentRole = 'requester';
+let currentView = 'chat';
+let currentRiskFlags = [];
+let tableData = [];        // current full dataset for the active table view
+let tableView = '';        // 'vendors' | 'pos' | 'invoices'
+
+document.getElementById('session-display').textContent = sessionId.slice(0, 8) + '…';
+
+/* ── Health polling ─────────────────────────────────────────────────────────── */
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API}/health`);
+    const ok = r.ok;
+    document.getElementById('status-dot').className = 'status-dot' + (ok ? '' : ' offline');
+    document.getElementById('status-label').textContent = ok ? 'Agent Online' : 'Agent Offline';
+  } catch {
+    document.getElementById('status-dot').className = 'status-dot offline';
+    document.getElementById('status-label').textContent = 'Agent Offline';
+  }
+}
+
+/* ── Stats refresh ──────────────────────────────────────────────────────────── */
+async function refreshStats() {
+  try {
+    const [vRes, pRes, iRes] = await Promise.all([
+      fetch(`${API}/vendors`),
+      fetch(`${API}/purchase-orders`),
+      fetch(`${API}/invoices`),
+    ]);
+    const vendors = await vRes.json();
+    const pos     = await pRes.json();
+    const invs    = await iRes.json();
+
+    renderVendorStats(vendors);
+    renderPOStats(pos);
+    renderInvStats(invs);
+
+    // Update table if currently visible
+    if (currentView === 'vendors')  populateTable(vendors, 'vendors');
+    if (currentView === 'pos')      populateTable(pos, 'pos');
+    if (currentView === 'invoices') populateTable(invs, 'invoices');
+
+    document.getElementById('last-updated').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    document.getElementById('last-updated').textContent = 'Update failed – API offline?';
+  }
+}
+
+function countBy(arr, key) {
+  return arr.reduce((acc, item) => {
+    acc[item[key]] = (acc[item[key]] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function renderVendorStats(vendors) {
+  const counts = countBy(vendors, 'status');
+  document.getElementById('vendor-count').textContent = vendors.length;
+  document.getElementById('vendor-total').textContent = vendors.length + ' total';
+  document.getElementById('vendor-dots').innerHTML = [
+    { label: 'Active',      count: counts.active      || 0, cls: 'dot-emerald' },
+    { label: 'Inactive',    count: counts.inactive    || 0, cls: 'dot-gray' },
+    { label: 'Blacklisted', count: counts.blacklisted || 0, cls: 'dot-red' },
+  ].map(d => `
+    <div class="dot-item">
+      <div class="dot ${d.cls}"></div>
+      <span>${d.count} ${d.label}</span>
+    </div>`).join('');
+}
+
+function renderPOStats(pos) {
+  const counts = countBy(pos, 'status');
+  const total  = pos.length;
+  document.getElementById('po-count').textContent = total;
+  document.getElementById('po-total').textContent = total + ' total';
+
+  const segs = [
+    { key: 'approved', cls: 'seg-emerald' },
+    { key: 'pending',  cls: 'seg-indigo' },
+    { key: 'draft',    cls: 'seg-gray' },
+    { key: 'rejected', cls: 'seg-red' },
+    { key: 'closed',   cls: 'seg-amber' },
+  ].filter(s => counts[s.key]);
+
+  document.getElementById('po-bar').innerHTML = segs.map(s => {
+    const pct = ((counts[s.key] || 0) / total * 100).toFixed(1);
+    return `<div class="seg ${s.cls}" style="flex:${counts[s.key]}"></div>`;
+  }).join('');
+
+  document.getElementById('po-dots').innerHTML = [
+    { key: 'approved', label: 'Approved', cls: 'dot-emerald' },
+    { key: 'pending',  label: 'Pending',  cls: 'dot-indigo' },
+    { key: 'draft',    label: 'Draft',    cls: 'dot-gray' },
+    { key: 'rejected', label: 'Rejected', cls: 'dot-red' },
+    { key: 'closed',   label: 'Closed',   cls: 'dot-amber' },
+  ].filter(d => counts[d.key]).map(d => `
+    <div class="dot-item">
+      <div class="dot ${d.cls}"></div>
+      <span>${counts[d.key]} ${d.label}</span>
+    </div>`).join('');
+}
+
+function renderInvStats(invs) {
+  const counts = countBy(invs, 'status');
+  document.getElementById('inv-count').textContent = invs.length;
+  document.getElementById('inv-total').textContent = invs.length + ' total';
+  document.getElementById('inv-dots').innerHTML = [
+    { key: 'paid',     label: 'Paid',     cls: 'dot-emerald' },
+    { key: 'pending',  label: 'Pending',  cls: 'dot-indigo' },
+    { key: 'disputed', label: 'Disputed', cls: 'dot-amber' },
+    { key: 'cancelled',label: 'Cancelled',cls: 'dot-red' },
+  ].filter(d => counts[d.key]).map(d => `
+    <div class="dot-item">
+      <div class="dot ${d.cls}"></div>
+      <span>${counts[d.key]} ${d.label}</span>
+    </div>`).join('');
+}
+
+/* ── Risk flags ─────────────────────────────────────────────────────────────── */
+function updateRiskFlags(flags) {
+  currentRiskFlags = [...new Set([...currentRiskFlags, ...flags])];
+  const el = document.getElementById('risk-list');
+  if (currentRiskFlags.length === 0) {
+    el.innerHTML = '<div class="no-flags">No flags this session</div>';
+  } else {
+    el.innerHTML = currentRiskFlags.map(f =>
+      `<div class="risk-flag-item">⚠️ ${escHtml(f)}</div>`
+    ).join('');
+  }
+}
+
+/* ── Chat ───────────────────────────────────────────────────────────────────── */
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function appendMessage(role, text, toolCalls = [], riskFlags = []) {
+  const empty = document.getElementById('chat-empty');
+  const msgs  = document.getElementById('messages');
+  if (empty.style.display !== 'none') {
+    empty.style.display = 'none';
+    msgs.style.display  = 'flex';
+  }
+
+  const isUser  = role === 'user';
+  const avatar  = isUser ? '👤' : '🤖';
+  const rowClass = isUser ? 'msg-row user' : 'msg-row agent';
+
+  const toolChips = toolCalls.map(t =>
+    `<span class="tool-chip">⚙️ ${escHtml(t)}</span>`
+  ).join('');
+
+  const metaHtml = toolChips ? `<div class="msg-meta">${toolChips}</div>` : '';
+
+  const row = document.createElement('div');
+  row.className = rowClass;
+  row.innerHTML = `
+    <div class="msg-avatar ${isUser ? 'user-av' : ''}">${avatar}</div>
+    <div class="msg-content">
+      <div class="msg-bubble">${escHtml(text)}</div>
+      ${metaHtml}
+    </div>`;
+  msgs.appendChild(row);
+
+  // Risk flag banner
+  if (riskFlags.length > 0) {
+    const banner = document.createElement('div');
+    banner.className = 'risk-banner';
+    banner.innerHTML = `
+      <div class="risk-banner-icon">⚠️</div>
+      <div class="risk-banner-text">${riskFlags.map(f => escHtml(f)).join('<br>')}</div>`;
+    msgs.appendChild(banner);
+  }
+
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function setTyping(visible) {
+  document.getElementById('typing').style.display = visible ? 'flex' : 'none';
+  document.getElementById('send-btn').disabled = visible;
+}
+
+async function sendMessage() {
+  const input = document.getElementById('msg-input');
+  const text  = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  autoResize(input);
+  appendMessage('user', text);
+  setTyping(true);
+
+  try {
+    const res = await fetch(`${API}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        message:    text,
+        role:       currentRole,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      appendMessage('agent', `Error ${res.status}: ${err.detail || res.statusText}`);
+      return;
+    }
+
+    const data = await res.json();
+    appendMessage('agent', data.reply, data.tool_calls_made || [], data.risk_flags || []);
+    updateRiskFlags(data.risk_flags || []);
+
+    // Refresh stats after any tool call (data may have changed)
+    if ((data.tool_calls_made || []).length > 0) {
+      await refreshStats();
+    }
+  } catch(e) {
+    appendMessage('agent', '⚠️ Network error — is the API server running on port 8000?');
+  } finally {
+    setTyping(false);
+  }
+}
+
+function sendSuggestion(text) {
+  document.getElementById('msg-input').value = text;
+  sendMessage();
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendMessage(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+/* ── Role selector ──────────────────────────────────────────────────────────── */
+function setRole(role) {
+  currentRole = role;
+  document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('role-' + role)?.classList.add('active');
+}
+
+/* ── View switching ─────────────────────────────────────────────────────────── */
+function switchView(view) {
+  currentView = view;
+
+  // Nav active state
+  ['chat','vendors','pos','invoices'].forEach(v => {
+    const id = v === 'pos' ? 'nav-pos' : `nav-${v}`;
+    document.getElementById(id)?.classList.toggle('active', v === view);
+  });
+
+  const chatEl  = document.getElementById('chat-view');
+  const tableEl = document.getElementById('table-view');
+  const roleEl  = document.getElementById('role-selector');
+  const titleEl = document.getElementById('panel-title');
+  const subEl   = document.getElementById('panel-subtitle');
+
+  if (view === 'chat') {
+    chatEl.style.display  = 'flex';
+    tableEl.style.display = 'none';
+    roleEl.style.display  = 'flex';
+    titleEl.textContent   = 'AI Procurement Assistant';
+    subEl.textContent     = 'Multi-turn agent with compliance guard rules';
+    return;
+  }
+
+  chatEl.style.display  = 'none';
+  tableEl.style.display = 'flex';
+  roleEl.style.display  = 'none';
+
+  const config = {
+    vendors:  { title: 'Vendors',         sub: 'Supplier registry',                url: `${API}/vendors` },
+    pos:      { title: 'Purchase Orders', sub: 'Lifecycle tracking',               url: `${API}/purchase-orders` },
+    invoices: { title: 'Invoices',        sub: 'Invoice records & dispute status', url: `${API}/invoices` },
+  }[view];
+
+  titleEl.textContent = config.title;
+  subEl.textContent   = config.sub;
+  tableView = view;
+
+  // Clear and show loading state
+  document.getElementById('table-body').innerHTML =
+    `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">Loading…</td></tr>`;
+
+  fetch(config.url)
+    .then(r => r.json())
+    .then(data => populateTable(data, view))
+    .catch(() => {
+      document.getElementById('table-body').innerHTML =
+        `<tr><td colspan="10" class="empty-table">Failed to load — is the API running?</td></tr>`;
+    });
+}
+
+function populateTable(data, view) {
+  tableData = data;
+
+  const statusFilter = document.getElementById('status-filter');
+  const statuses = [...new Set(data.map(r => r.status))].sort();
+  const prevVal  = statusFilter.value;
+  statusFilter.innerHTML = '<option value="">All statuses</option>' +
+    statuses.map(s => `<option value="${s}"${s===prevVal?' selected':''}>${capitalise(s)}</option>`).join('');
+
+  renderTableBody(data, view);
+  buildTableHead(view);
+}
+
+function buildTableHead(view) {
+  const heads = {
+    vendors:  ['Name','Contact','Email','Phone','Status'],
+    pos:      ['PO Number','Vendor','Description','Amount','Status','Requested By'],
+    invoices: ['Invoice #','PO Number','Vendor','Amount','Due Date','Paid Date','Status'],
+  };
+  document.getElementById('table-head').innerHTML =
+    '<tr>' + (heads[view]||[]).map(h => `<th>${h}</th>`).join('') + '</tr>';
+}
+
+function renderTableBody(data, view) {
+  const filter   = document.getElementById('table-filter').value.toLowerCase();
+  const statusF  = document.getElementById('status-filter').value;
+
+  let filtered = data.filter(r => {
+    const matchStatus = !statusF || r.status === statusF;
+    const matchText   = !filter  || JSON.stringify(r).toLowerCase().includes(filter);
+    return matchStatus && matchText;
+  });
+
+  const tbody = document.getElementById('table-body');
+  const empty = document.getElementById('table-empty');
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const rows = {
+    vendors: r => `
+      <td>${escHtml(r.name)}</td>
+      <td class="td-muted">${escHtml(r.contact||'—')}</td>
+      <td class="td-muted">${escHtml(r.email||'—')}</td>
+      <td class="td-muted">${escHtml(r.phone||'—')}</td>
+      <td>${badge(r.status)}</td>`,
+    pos: r => `
+      <td><code style="font-size:12px;color:var(--indigo)">${escHtml(r.po_number)}</code></td>
+      <td>${escHtml(r.vendor_name)}</td>
+      <td class="td-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(r.description||'—')}</td>
+      <td class="td-amount">$${Number(r.amount).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+      <td>${badge(r.status)}</td>
+      <td class="td-muted">${escHtml(r.requested_by||'—')}</td>`,
+    invoices: r => `
+      <td><code style="font-size:12px;color:var(--indigo)">${escHtml(r.invoice_number)}</code></td>
+      <td class="td-muted">${escHtml(r.po_number)}</td>
+      <td>${escHtml(r.vendor_name)}</td>
+      <td class="td-amount">$${Number(r.amount).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+      <td class="td-muted">${escHtml(r.due_date||'—')}</td>
+      <td class="td-muted">${escHtml(r.paid_date||'—')}</td>
+      <td>${badge(r.status)}</td>`,
+  }[view];
+
+  tbody.innerHTML = filtered.map(r => `<tr>${rows(r)}</tr>`).join('');
+}
+
+function filterTable() {
+  if (tableData.length) renderTableBody(tableData, tableView);
+}
+
+function badge(status) {
+  return `<span class="badge badge-${escHtml(status)}">${capitalise(status)}</span>`;
+}
+
+function capitalise(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+/* ── Init ───────────────────────────────────────────────────────────────────── */
+(async function init() {
+  await checkHealth();
+  await refreshStats();
+  setInterval(refreshStats, 15_000);
+  setInterval(checkHealth, 30_000);
+  document.getElementById('msg-input').focus();
+})();
+</script>
+</body>
+</html>
