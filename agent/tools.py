@@ -97,8 +97,14 @@ def create_purchase_order(
 ) -> str:
     """
     Create a new draft purchase order for the named vendor.
+    ONLY use these exact parameters:
+      - vendor_name: str  (must match an existing vendor name)
+      - description: str  (what is being purchased)
+      - amount: float     (total value in USD)
+      - requested_by: str (email of the requester)
     The PO starts in 'draft' status and must be approved separately.
     Returns the generated PO number on success.
+    Do NOT pass any other parameters.
     """
     po_number = "PO-" + "".join(random.choices(string.digits, k=6))
 

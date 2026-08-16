@@ -1,7 +1,7 @@
 """
 main.py
 ───────
-ProcureGuard AI — LangGraph agent with local HuggingFace LLM inference.
+ProcureGuard AI — LangGraph agent with Groq Llama 3.1 (API-based, no downloads).
 
 Usage:
     python main.py
@@ -30,9 +30,8 @@ from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
-# ── HuggingFace local pipeline ────────────────────────────────────────────────
-from transformers import pipeline as hf_pipeline
-from langchain_community.llms import HuggingFacePipeline
+# ── LangChain / Groq ─────────────────────────────────────────────────────────
+from langchain_groq import ChatGroq
 
 # ── Agent modules ─────────────────────────────────────────────────────────────
 from agent.state import AgentState
@@ -49,7 +48,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-MODEL_NAME:     str = os.getenv("MODEL_NAME",     "google/flan-t5-base")
+GROQ_MODEL:     str = os.getenv("GROQ_MODEL",     "llama-3.1-8b-instant")
 MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "512"))
 DB_PATH:        str = os.getenv("DB_PATH",        "data/procurement.db")
 
@@ -81,16 +80,21 @@ Be concise, professional, and proactive about surfacing compliance issues."""
 # 1. LLM Initialisation
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_llm() -> HuggingFacePipeline:
-    """Load a local HuggingFace text-generation pipeline and wrap for LangChain."""
-    log.info("Loading model: %s", MODEL_NAME)
-    pipe = hf_pipeline(
-        task="text2text-generation",    # swap for "text-generation" on decoder-only models
-        model=MODEL_NAME,
-        max_new_tokens=MAX_NEW_TOKENS,
-        device_map="auto",              # uses GPU if available, otherwise CPU
+def build_llm() -> ChatGroq:
+    """Initialise Groq ChatGroq LLM (API-based — no local model download)."""
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        raise RuntimeError(
+            "GROQ_API_KEY not set. Get a free key at https://console.groq.com "
+            "and add it to your .env file."
+        )
+    log.info("Initialising Groq LLM: %s", GROQ_MODEL)
+    return ChatGroq(
+        model=GROQ_MODEL,
+        temperature=0.1,
+        max_tokens=MAX_NEW_TOKENS,
+        api_key=api_key,
     )
-    return HuggingFacePipeline(pipeline=pipe)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -113,6 +117,23 @@ def agent_node(state: AgentState, llm_with_tools) -> dict:
     return {"messages": [response]}
 
 
+def _coerce_tool_args(args: dict) -> dict:
+    """
+    Groq sometimes serialises numeric args as strings (e.g. "87500.0" → 87500.0).
+    Coerce any string value that parses cleanly to int/float.
+    """
+    out = {}
+    for k, v in args.items():
+        if isinstance(v, str):
+            try:
+                out[k] = int(v) if v.isdigit() else float(v)
+            except ValueError:
+                out[k] = v
+        else:
+            out[k] = v
+    return out
+
+
 def tool_node(state: AgentState) -> dict:
     """
     Executes tool calls from the last AIMessage.
@@ -128,7 +149,7 @@ def tool_node(state: AgentState) -> dict:
             continue
 
         tool_fn = TOOL_MAP.get(tc["name"])
-        result = tool_fn.invoke(tc["args"]) if tool_fn else f"Unknown tool: {tc['name']}"
+        result = tool_fn.invoke(_coerce_tool_args(tc["args"])) if tool_fn else f"Unknown tool: {tc['name']}"
 
         tool_messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         log.info("Tool '%s' → %s", tc["name"], str(result)[:120])
