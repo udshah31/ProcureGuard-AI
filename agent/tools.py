@@ -31,6 +31,8 @@ log = logging.getLogger(__name__)
 
 DB_PATH: str = os.getenv("DB_PATH", "data/procurement.db")
 
+PO_NUMBER_ATTEMPTS = 5
+
 
 # ── DB helper ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,12 @@ def _get_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
+
+
+def _norm_id(value: str) -> str:
+    """Canonicalise a PO/invoice number. SQLite '=' is case-sensitive, so an
+    un-normalised 'po-100002' reads as a missing record rather than a match."""
+    return (value or "").strip().upper()
 
 
 def _write_audit(
@@ -118,18 +126,26 @@ def create_purchase_order(
                 f"Cannot create PO: vendor '{vendor_name}' not found. "
                 "Register them first with the add_vendor tool."
             )
-        if vendor is None:
-            return f"Vendor '{vendor_name}' is not registered."
 
-        conn.execute(
-            """
-            INSERT INTO purchase_orders
-                (po_number, vendor_id, description, amount, requested_by, status)
-            VALUES (?, ?, ?, ?, ?, 'draft')
-            """,
-            (po_number, vendor["id"], description, amount, requested_by),
-        )
-        _write_audit(conn, "purchase_order", vendor["id"], "created", requested_by,
+        # po_number is random against a UNIQUE column, so collisions are a
+        # question of when, not if. Retry rather than surfacing IntegrityError.
+        for attempt in range(PO_NUMBER_ATTEMPTS):
+            try:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO purchase_orders
+                        (po_number, vendor_id, description, amount, requested_by, status)
+                    VALUES (?, ?, ?, ?, ?, 'draft')
+                    """,
+                    (po_number, vendor["id"], description, amount, requested_by),
+                )
+                break
+            except sqlite3.IntegrityError:
+                if attempt == PO_NUMBER_ATTEMPTS - 1:
+                    return "Could not allocate a unique PO number. Please retry."
+                po_number = "PO-" + "".join(random.choices(string.digits, k=6))
+
+        _write_audit(conn, "purchase_order", cursor.lastrowid, "created", requested_by,
                      {"po_number": po_number, "amount": amount, "description": description})
         conn.commit()
 
@@ -146,6 +162,7 @@ def check_invoice_status(invoice_number: str) -> str:
     Check the current status of an invoice by its invoice number.
     Returns amount, currency, due date, and status.
     """
+    invoice_number = _norm_id(invoice_number)
     with _get_db() as conn:
         row = conn.execute(
             """
@@ -180,6 +197,7 @@ def approve_purchase_order(po_number: str, approved_by: str) -> str:
     Records the approver name and writes to the audit log.
     NOTE: Guard rules are checked by the agent before calling this tool.
     """
+    po_number = _norm_id(po_number)
     with _get_db() as conn:
         po = conn.execute(
             "SELECT id, status, amount, vendor_id FROM purchase_orders WHERE po_number = ?",
@@ -188,22 +206,26 @@ def approve_purchase_order(po_number: str, approved_by: str) -> str:
 
         if not po:
             return f"PO '{po_number}' not found."
-        if po["status"] == "approved":
-            return f"PO '{po_number}' is already approved."
-        if po["status"] not in ("draft", "pending"):
+        if po["status"] not in ("draft", "pending", "approved"):
             return (
                 f"PO '{po_number}' cannot be approved — current status: "
                 f"{po['status'].upper()}."
             )
 
-        conn.execute(
+        # Fold the status check into the UPDATE itself so it's atomic with the
+        # write — a prior SELECT-then-UPDATE let two concurrent approvals both
+        # read 'pending' before either committed, silently double-approving.
+        cursor = conn.execute(
             """
             UPDATE purchase_orders
             SET status = 'approved', approved_by = ?, updated_at = datetime('now')
-            WHERE po_number = ?
+            WHERE po_number = ? AND status IN ('draft', 'pending')
             """,
             (approved_by, po_number),
         )
+        if cursor.rowcount == 0:
+            return f"PO '{po_number}' is already approved."
+
         _write_audit(
             conn, "purchase_order", po["id"], "approved", approved_by,
             {"po_number": po_number, "amount": po["amount"]},
@@ -220,6 +242,7 @@ def reject_purchase_order(po_number: str, rejected_by: str, reason: str) -> str:
     Reject a purchase order with a mandatory reason.
     Status moves to 'rejected' and the reason is logged to audit_log.
     """
+    po_number = _norm_id(po_number)
     with _get_db() as conn:
         po = conn.execute(
             "SELECT id, status FROM purchase_orders WHERE po_number = ?",
@@ -228,19 +251,20 @@ def reject_purchase_order(po_number: str, rejected_by: str, reason: str) -> str:
 
         if not po:
             return f"PO '{po_number}' not found."
-        if po["status"] == "rejected":
-            return f"PO '{po_number}' is already rejected."
         if po["status"] == "closed":
             return f"PO '{po_number}' is closed and cannot be rejected."
 
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE purchase_orders
             SET status = 'rejected', updated_at = datetime('now')
-            WHERE po_number = ?
+            WHERE po_number = ? AND status != 'rejected'
             """,
             (po_number,),
         )
+        if cursor.rowcount == 0:
+            return f"PO '{po_number}' is already rejected."
+
         _write_audit(
             conn, "purchase_order", po["id"], "rejected", rejected_by,
             {"po_number": po_number, "reason": reason},
@@ -264,19 +288,23 @@ def add_vendor(
     Vendor starts with 'active' status. Returns the new vendor ID.
     """
     with _get_db() as conn:
-        existing = conn.execute(
-            "SELECT id FROM vendors WHERE name = ?", (name,)
-        ).fetchone()
-        if existing:
-            return f"Vendor '{name}' already exists (ID: {existing['id']})."
-
+        # ON CONFLICT keeps the existence check atomic with the insert; a prior
+        # SELECT-then-INSERT let two concurrent registrations both see "absent"
+        # and the loser got a raw IntegrityError instead of this message.
         cursor = conn.execute(
             """
             INSERT INTO vendors (name, contact, email, phone, address, status)
             VALUES (?, ?, ?, ?, ?, 'active')
+            ON CONFLICT(name) DO NOTHING
             """,
             (name, contact, email, phone, address),
         )
+        if cursor.rowcount == 0:
+            existing = conn.execute(
+                "SELECT id FROM vendors WHERE name = ?", (name,)
+            ).fetchone()
+            return f"Vendor '{name}' already exists (ID: {existing['id']})."
+
         vendor_id = cursor.lastrowid
         _write_audit(conn, "vendor", vendor_id, "created", "agent",
                      {"name": name, "email": email})
@@ -297,6 +325,7 @@ def flag_suspicious_invoice(
     Sets invoice status to 'disputed' and records the reason in the audit log.
     Use when an invoice amount doesn't match the PO, or appears fraudulent.
     """
+    invoice_number = _norm_id(invoice_number)
     with _get_db() as conn:
         inv = conn.execute(
             "SELECT id, status, amount FROM invoices WHERE invoice_number = ?",
@@ -305,22 +334,23 @@ def flag_suspicious_invoice(
 
         if not inv:
             return f"Invoice '{invoice_number}' not found."
-        if inv["status"] == "disputed":
-            return f"Invoice '{invoice_number}' is already marked as disputed."
         if inv["status"] == "paid":
             return (
                 f"⚠️  Invoice '{invoice_number}' is already PAID. "
                 "Flagging for review — contact finance to initiate a reversal."
             )
 
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE invoices
             SET status = 'disputed', updated_at = datetime('now')
-            WHERE invoice_number = ?
+            WHERE invoice_number = ? AND status != 'disputed'
             """,
             (invoice_number,),
         )
+        if cursor.rowcount == 0:
+            return f"Invoice '{invoice_number}' is already marked as disputed."
+
         _write_audit(
             conn, "invoice", inv["id"], "flagged_suspicious", flagged_by,
             {"invoice_number": invoice_number, "reason": reason, "amount": inv["amount"]},

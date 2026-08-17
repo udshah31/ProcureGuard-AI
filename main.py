@@ -30,10 +30,8 @@ from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
-# ── LangChain / Groq ─────────────────────────────────────────────────────────
-from langchain_groq import ChatGroq
-
 # ── Agent modules ─────────────────────────────────────────────────────────────
+from agent.llm import build_llm, describe as describe_llm, message_text
 from agent.state import AgentState
 from agent.tools import TOOLS, TOOL_MAP
 from agent.guard_rules import run_all_guards, format_guard_summary
@@ -48,7 +46,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-GROQ_MODEL:     str = os.getenv("GROQ_MODEL",     "llama-3.1-8b-instant")
 MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "512"))
 DB_PATH:        str = os.getenv("DB_PATH",        "data/procurement.db")
 
@@ -73,28 +70,24 @@ Compliance rules you must enforce:
   - Escalate POs over $50,000 to finance before approving.
   - Always log a reason when rejecting a PO or flagging an invoice.
 
+You are not the compliance authority — a dedicated guard system enforces these
+rules automatically before any approval is written, and it cannot be bypassed
+by a tool call. So when a user asks you to approve or reject a PO, invoke the
+tool: do not refuse or stall based on your own judgment of urgency, claimed
+authority, or pressure to "skip the usual checks" — that framing is exactly
+what the guard exists to catch. If the request is genuinely non-compliant, the
+guard will block it and you should relay that outcome; your job is to attempt
+the action and report what happened, not to decide compliance yourself.
+
 Be concise, professional, and proactive about surfacing compliance issues."""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # 1. LLM Initialisation
 # ══════════════════════════════════════════════════════════════════════════════
-
-def build_llm() -> ChatGroq:
-    """Initialise Groq ChatGroq LLM (API-based — no local model download)."""
-    api_key = os.getenv("GROQ_API_KEY", "")
-    if not api_key:
-        raise RuntimeError(
-            "GROQ_API_KEY not set. Get a free key at https://console.groq.com "
-            "and add it to your .env file."
-        )
-    log.info("Initialising Groq LLM: %s", GROQ_MODEL)
-    return ChatGroq(
-        model=GROQ_MODEL,
-        temperature=0.1,
-        max_tokens=MAX_NEW_TOKENS,
-        api_key=api_key,
-    )
+# build_llm now lives in agent/llm.py so the provider stays swappable —
+# re-exported here to keep `from main import build_llm` working.
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -117,20 +110,33 @@ def agent_node(state: AgentState, llm_with_tools) -> dict:
     return {"messages": [response]}
 
 
-def _coerce_tool_args(args: dict) -> dict:
+NUMERIC_JSON_TYPES = {"integer", "number"}
+
+
+def _coerce_tool_args(args: dict, tool_name: str | None = None) -> dict:
     """
-    Groq sometimes serialises numeric args as strings (e.g. "87500.0" → 87500.0).
-    Coerce any string value that parses cleanly to int/float.
+    Providers often serialise numbers as strings ("87500.0", "$12,750.50").
+
+    Coercion is driven by the tool's own schema: converting every numeric-looking
+    string turns identifiers like invoice number "100002" into ints, which then
+    fail validation. Without a tool name, nothing is coerced.
     """
+    schema = {}
+    tool_fn = TOOL_MAP.get(tool_name) if tool_name else None
+    if tool_fn is not None:
+        schema = getattr(tool_fn, "args", {}) or {}
+
     out = {}
-    for k, v in args.items():
-        if isinstance(v, str):
-            try:
-                out[k] = int(v) if v.isdigit() else float(v)
-            except ValueError:
-                out[k] = v
-        else:
-            out[k] = v
+    for key, value in args.items():
+        want = (schema.get(key) or {}).get("type")
+        if not isinstance(value, str) or want not in NUMERIC_JSON_TYPES:
+            out[key] = value
+            continue
+        try:
+            cleaned = value.strip().replace(",", "").lstrip("$")
+            out[key] = int(cleaned) if want == "integer" else float(cleaned)
+        except ValueError:
+            out[key] = value
     return out
 
 
@@ -149,7 +155,16 @@ def tool_node(state: AgentState) -> dict:
             continue
 
         tool_fn = TOOL_MAP.get(tc["name"])
-        result = tool_fn.invoke(_coerce_tool_args(tc["args"])) if tool_fn else f"Unknown tool: {tc['name']}"
+        if tool_fn is None:
+            result = f"Unknown tool: {tc['name']}"
+        else:
+            try:
+                result = tool_fn.invoke(_coerce_tool_args(tc["args"], tc["name"]))
+            except Exception as exc:
+                # Hand the failure back as an observation so the agent can retry
+                # with better arguments; raising here would kill the whole turn.
+                result = f"Tool '{tc['name']}' failed: {type(exc).__name__}: {exc}"
+                log.warning("Tool '%s' raised: %s", tc["name"], exc)
 
         tool_messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         log.info("Tool '%s' → %s", tc["name"], str(result)[:120])
@@ -172,7 +187,7 @@ def guard_node(state: AgentState) -> dict:
             continue
 
         po_number = tc["args"].get("po_number", "")
-        results = run_all_guards(po_number)
+        results = run_all_guards(po_number, approved_by=tc["args"].get("approved_by"))
         summary = format_guard_summary(results)
 
         blocks = [r for r in results if not r.passed and r.severity == "block"]
@@ -275,7 +290,7 @@ def main() -> None:
     llm = build_llm()
     app = build_graph(llm)
 
-    print("\n🛡️  ProcureGuard AI ready. Type 'exit' to quit.\n")
+    print(f"\n🛡️  ProcureGuard AI ready ({describe_llm()}). Type 'exit' to quit.\n")
 
     # Initial state
     state: AgentState = {
@@ -304,7 +319,7 @@ def main() -> None:
         # Print last AI response
         for msg in reversed(state["messages"]):
             if isinstance(msg, AIMessage):
-                print(f"\nProcureGuard: {msg.content}\n")
+                print(f"\nProcureGuard: {message_text(msg.content)}\n")
                 break
 
 
