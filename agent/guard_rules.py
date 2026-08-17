@@ -45,6 +45,11 @@ def _get_db() -> sqlite3.Connection:
     return conn
 
 
+def _norm_id(value: str) -> str:
+    """Match the normalisation in agent/tools.py — SQLite '=' is case-sensitive."""
+    return (value or "").strip().upper()
+
+
 # ── Individual checks ─────────────────────────────────────────────────────────
 
 def check_amount_threshold(amount: float) -> GuardResult:
@@ -117,10 +122,14 @@ def check_vendor_status(vendor_id: int) -> GuardResult:
     )
 
 
-def check_duplicate_po(vendor_id: int, amount: float) -> GuardResult:
+def check_duplicate_po(
+    vendor_id: int, amount: float, exclude_po_id: int | None = None
+) -> GuardResult:
     """
     Warn if a PO of similar amount (±20%) exists for this vendor
     within the last N days (default 30). Helps detect duplicate submissions.
+
+    exclude_po_id omits the PO under review so it cannot match itself.
     """
     lower = amount * 0.80
     upper = amount * 1.20
@@ -134,10 +143,11 @@ def check_duplicate_po(vendor_id: int, amount: float) -> GuardResult:
               AND amount BETWEEN ? AND ?
               AND status NOT IN ('rejected', 'closed')
               AND created_at >= datetime('now', ? || ' days')
+              AND id IS NOT ?
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            (vendor_id, lower, upper, f"-{DUPLICATE_WINDOW_DAYS}"),
+            (vendor_id, lower, upper, f"-{DUPLICATE_WINDOW_DAYS}", exclude_po_id),
         ).fetchone()
 
     if duplicate:
@@ -161,22 +171,58 @@ def check_duplicate_po(vendor_id: int, amount: float) -> GuardResult:
     )
 
 
+def check_self_approval(requested_by: str | None, approved_by: str) -> GuardResult:
+    """
+    Block a requester from approving their own PO (segregation of duties).
+
+    This is the control most procurement fraud depends on, so it blocks rather
+    than warns.
+    """
+    requester = (requested_by or "").strip().lower()
+    approver = (approved_by or "").strip().lower()
+
+    if requester and approver and requester == approver:
+        return GuardResult(
+            check="self_approval",
+            passed=False,
+            severity="block",
+            message=(
+                f"🚫 BLOCKED: '{approved_by}' raised this PO and cannot also "
+                "approve it. Segregation of duties requires a second approver."
+            ),
+        )
+
+    return GuardResult(
+        check="self_approval",
+        passed=True,
+        severity="block",
+        message="Requester and approver are different people.",
+    )
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
-def run_all_guards(po_number: str) -> list[GuardResult]:
+def run_all_guards(po_number: str, approved_by: str | None = None) -> list[GuardResult]:
     """
     Run all guard checks for a given PO number.
     Returns a list of GuardResult objects — callers should check for failures.
 
+    approved_by enables the segregation-of-duties check; without it that check
+    is skipped rather than passed, so a missing approver can't look like a clean
+    result.
+
     Example:
-        results = run_all_guards("PO-123456")
+        results = run_all_guards("PO-123456", approved_by="manager@company.com")
         blocks  = [r for r in results if not r.passed and r.severity == "block"]
         warns   = [r for r in results if not r.passed and r.severity == "warn"]
     """
     with _get_db() as conn:
         po = conn.execute(
-            "SELECT id, amount, vendor_id FROM purchase_orders WHERE po_number = ?",
-            (po_number,),
+            """
+            SELECT id, amount, vendor_id, requested_by
+            FROM purchase_orders WHERE po_number = ?
+            """,
+            (_norm_id(po_number),),
         ).fetchone()
 
     if not po:
@@ -192,8 +238,11 @@ def run_all_guards(po_number: str) -> list[GuardResult]:
     results = [
         check_amount_threshold(po["amount"]),
         check_vendor_status(po["vendor_id"]),
-        check_duplicate_po(po["vendor_id"], po["amount"]),
+        check_duplicate_po(po["vendor_id"], po["amount"], exclude_po_id=po["id"]),
     ]
+
+    if approved_by:
+        results.append(check_self_approval(po["requested_by"], approved_by))
 
     for r in results:
         if not r.passed:
@@ -215,10 +264,11 @@ def format_guard_summary(results: list[GuardResult]) -> str:
     warns  = [r for r in failures if r.severity == "warn"]
 
     lines = ["**Compliance Check Results:**"]
+    # Messages already carry their own severity marker, so don't re-prefix.
     for r in blocks:
-        lines.append(f"- 🚫 BLOCKED — {r.message}")
+        lines.append(f"- {r.message}")
     for r in warns:
-        lines.append(f"- ⚠️  WARNING — {r.message}")
+        lines.append(f"- {r.message}")
 
     if blocks:
         lines.append("\n**This PO cannot be approved until blocking issues are resolved.**")

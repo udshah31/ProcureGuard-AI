@@ -130,7 +130,15 @@ def test_concurrent_flags_of_same_invoice_only_succeed_once(db, make_vendor, mak
 
 def test_concurrent_registrations_of_same_vendor_only_succeed_once(db):
     """SELECT-then-INSERT on a UNIQUE name had the same race: both callers saw
-    'absent' and the loser got a raw IntegrityError instead of a clean message."""
+    'absent' and the loser got a raw IntegrityError instead of a clean message.
+
+    Caveat: unlike the approve/reject/flag cases above, this one rarely trips
+    the old code under natural threading — SQLite's write lock serialises the
+    fast path, so the second SELECT usually already sees the committed row.
+    Forcing the window open with a barrier reproduces it every time (19/20
+    threads raise IntegrityError). Treat this as a behavioural regression test
+    for the one-winner contract, not as proof the race is gone.
+    """
     results = _run_concurrently(
         lambda i: add_vendor.invoke(
             {

@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Request, HTTPException
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from agent.llm import message_text
 from api.models import ChatRequest, ChatResponse, HealthResponse
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,15 @@ def chat(request: Request, body: ChatRequest) -> ChatResponse:
     graph:         Any = request.app.state.graph
     session_store: Any = request.app.state.session_store
 
+    if graph is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No LLM configured. Set a provider key in .env (GROQ_API_KEY or "
+                "GOOGLE_API_KEY), or set LLM_PROVIDER=ollama to run locally."
+            ),
+        )
+
     # Get or create session state
     state = session_store.get_or_create(body.session_id, role=body.role)
 
@@ -71,7 +81,7 @@ def chat(request: Request, body: ChatRequest) -> ChatResponse:
     reply = ""
     for msg in reversed(state["messages"]):
         if isinstance(msg, AIMessage):
-            reply = msg.content
+            reply = message_text(msg.content)
             break
 
     # Collect tool calls made in this turn

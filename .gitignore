@@ -37,3 +37,6 @@ logs/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# ── Eval run artifacts ────────────────────────────────────────────────────────
+evals/reports/

@@ -1,7 +1,7 @@
 [project]
 name = "procurement-agent"
 version = "0.1.0"
-description = "A LangGraph-powered procurement automation agent with local HuggingFace LLM inference."
+description = "A LangGraph-powered procurement automation agent with a compliance guard layer."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []  # managed via requirements.txt for now

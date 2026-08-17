@@ -4,8 +4,12 @@ python-dotenv>=1.0.0
 # ── LangChain / LangGraph ─────────────────────────────────────────────────────
 langchain>=0.2.0
 langchain-core>=0.2.0
-langchain-groq>=0.1.6          # Groq LLM — free, fast, no local downloads
 langgraph>=0.1.0
+
+# ── LLM providers (pick one — see LLM_PROVIDER in .env) ───────────────────────
+langchain-groq>=0.1.6          # Groq — free tier, fast
+langchain-google-genai>=2.0.0  # Gemini — free tier
+langchain-ollama>=0.1.0        # Ollama — local, no API key
 
 # ── REST API ─────────────────────────────────────────────────────────────────
 fastapi>=0.111.0

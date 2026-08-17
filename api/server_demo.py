@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from agent.guard_rules import format_guard_summary, run_all_guards
 from api.sessions import SessionStore
 from api.models import ChatRequest, ChatResponse, HealthResponse
 from api.routers import vendors, purchase_orders, invoices
@@ -159,30 +160,18 @@ def mock_agent(message: str, role: str) -> tuple[str, list[str], list[str]]:
         if not po:
             return f"PO '{po_num}' not found.", tools, flags
 
-        # Guard checks (inlined — no langchain needed)
-        with _db() as conn:
-            vendor = conn.execute("SELECT name,status FROM vendors WHERE id=?", (po["vendor_id"],)).fetchone()
-        flags = []
-        blocked = False
-        if vendor and vendor["status"] == "blacklisted":
-            flags.append(f"🚫 BLOCKED: Vendor '{vendor['name']}' is BLACKLISTED — PO cannot be approved.")
-            blocked = True
-        if po["amount"] > 50000:
-            flags.append(f"⚠️  PO amount ${po['amount']:,.2f} exceeds $50,000 threshold — finance sign-off required.")
-        # Duplicate PO check
-        with _db() as conn:
-            dup = conn.execute(
-                "SELECT po_number FROM purchase_orders WHERE vendor_id=? AND amount BETWEEN ? AND ? AND status NOT IN ('rejected','closed') AND po_number!=? AND created_at>=datetime('now','-30 days')",
-                (po["vendor_id"], po["amount"]*0.8, po["amount"]*1.2, po_num),
-            ).fetchone()
-        if dup:
-            flags.append(f"⚠️  Possible duplicate: {dup['po_number']} has a similar amount within 30 days.")
+        # Same guard layer the real agent uses (agent.guard_rules is pure
+        # stdlib, so demo mode still needs no langchain). Previously inlined,
+        # which let demo mode drift behind the real compliance rules.
+        results = run_all_guards(po_num, approved_by=approved_by)
+        failures = [r for r in results if not r.passed]
+        flags = [r.message for r in failures]
+        blocked = any(r.severity == "block" for r in failures)
 
         if blocked:
             return (
-                f"🚫 **Approval BLOCKED** for {po_num}\n\n" +
-                "\n".join(f"• {f}" for f in flags) +
-                "\n\n**This PO cannot be approved until blocking issues are resolved.**",
+                f"🚫 **Approval BLOCKED** for {po_num}\n\n"
+                + format_guard_summary(results),
                 tools, flags,
             )
 

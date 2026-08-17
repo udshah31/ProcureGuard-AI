@@ -42,7 +42,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 DB_PATH:        str = os.getenv("DB_PATH",    "data/procurement.db")
-GROQ_MODEL:     str = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "512"))
 
 
@@ -67,24 +66,22 @@ async def lifespan(app: FastAPI):
         from db.seed import seed
         seed(DB_PATH)
 
-    # 3. Init Groq LLM (API-based — no local model download needed)
-    groq_key = os.getenv("GROQ_API_KEY", "")
-    if not groq_key:
-        log.warning("GROQ_API_KEY not set — chat will fail. Get a free key at https://console.groq.com")
-    log.info("Initialising Groq LLM '%s'…", GROQ_MODEL)
-    from langchain_groq import ChatGroq
-    llm = ChatGroq(
-        model=GROQ_MODEL,
-        temperature=0.1,
-        max_tokens=MAX_NEW_TOKENS,
-        api_key=groq_key or "not-set",
-    )
-    log.info("Groq LLM ready.")
+    # 3. Init the configured LLM provider (groq | gemini | ollama)
+    from agent.llm import build_llm, describe as describe_llm
+
+    model_name = describe_llm()
+    try:
+        llm = build_llm()
+        log.info("LLM ready: %s", model_name)
+    except RuntimeError as exc:
+        # Let the rest of the API serve; only /chat depends on the model.
+        log.warning("LLM unavailable — chat will fail: %s", exc)
+        llm = None
 
     # 4. Build and compile LangGraph (once)
     from main import build_graph
-    graph = build_graph(llm)
-    log.info("LangGraph compiled.")
+    graph = build_graph(llm) if llm else None
+    log.info("LangGraph compiled." if graph else "LangGraph not compiled — no LLM.")
 
     # 5. Session store
     session_store = SessionStore()
@@ -92,7 +89,7 @@ async def lifespan(app: FastAPI):
     # Attach to app.state for router access
     app.state.graph         = graph
     app.state.session_store = session_store
-    app.state.model_name    = GROQ_MODEL
+    app.state.model_name    = model_name
     app.state.db_path       = DB_PATH
 
     yield  # ← server runs here
