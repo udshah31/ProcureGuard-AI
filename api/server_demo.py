@@ -23,23 +23,22 @@ import sqlite3
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import Depends, FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent.guard_rules import format_guard_summary, run_all_guards
+from api.auth import require_api_key
+from api.middleware import RequestContextMiddleware
 from api.rate_limit import RateLimiter
 from api.sessions import SessionStore
 from api.models import ChatRequest, ChatResponse, HealthResponse
-from api.routers import vendors, purchase_orders, invoices
+from api.routers import vendors, purchase_orders, invoices, observability as observability_router
+from observability import configure_logging, metrics
 
 load_dotenv()
-
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+configure_logging()
 log = logging.getLogger(__name__)
 
 DB_PATH: str = os.getenv("DB_PATH", "data/procurement.db")
@@ -405,11 +404,17 @@ app.add_middleware(
     allow_origins=["*"], allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
+app.add_middleware(RequestContextMiddleware)
 
 PREFIX = "/api/v1"
-app.include_router(vendors.router,         prefix=PREFIX, tags=["Vendors"])
-app.include_router(purchase_orders.router, prefix=PREFIX, tags=["Purchase Orders"])
-app.include_router(invoices.router,        prefix=PREFIX, tags=["Invoices"])
+app.include_router(vendors.router,           prefix=PREFIX, tags=["Vendors"],
+                    dependencies=[Depends(require_api_key)])
+app.include_router(purchase_orders.router,   prefix=PREFIX, tags=["Purchase Orders"],
+                    dependencies=[Depends(require_api_key)])
+app.include_router(invoices.router,          prefix=PREFIX, tags=["Invoices"],
+                    dependencies=[Depends(require_api_key)])
+app.include_router(observability_router.router, prefix=PREFIX, tags=["Observability"],
+                    dependencies=[Depends(require_api_key)])
 
 
 # ── Chat endpoint (inline — no langchain needed) ──────────────────────────────
@@ -417,20 +422,22 @@ from fastapi import APIRouter
 _chat = APIRouter()
 
 @_chat.post("/chat", response_model=ChatResponse)
-def chat(request: Request, body: ChatRequest) -> ChatResponse:
+def chat(request: Request, body: ChatRequest, role: str = Depends(require_api_key)) -> ChatResponse:
     client_key = request.client.host if request.client else "unknown"
     allowed, retry_after = request.app.state.chat_rate_limiter.check(client_key)
     if not allowed:
+        metrics.increment("chat_rate_limited_total")
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Please slow down and try again shortly.",
             headers={"Retry-After": str(int(retry_after) + 1)},
         )
 
+    metrics.increment("chat_requests_total")
     store = request.app.state.session_store
-    store.get_or_create(body.session_id, role=body.role)
-    reply, tool_calls, risk_flags = mock_agent(body.message, body.role)
-    store.update(body.session_id, {"messages": [], "role": body.role,
+    store.get_or_create(body.session_id, role=role)
+    reply, tool_calls, risk_flags = mock_agent(body.message, role)
+    store.update(body.session_id, {"messages": [], "role": role,
                                     "context": {}, "risk_flags": risk_flags})
     log.info("Chat [%s] tools=%s → %d chars", body.session_id, tool_calls, len(reply))
     return ChatResponse(session_id=body.session_id, reply=reply,

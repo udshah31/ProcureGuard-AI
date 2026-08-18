@@ -26,11 +26,6 @@ class ChatRequest(BaseModel):
         description="The user's message to the procurement agent.",
         examples=["Look up vendor Acme Corp"],
     )
-    role: str = Field(
-        default="requester",
-        description="The user's role. One of: requester, approver, finance, admin.",
-        examples=["approver"],
-    )
 
 
 class ChatResponse(BaseModel):

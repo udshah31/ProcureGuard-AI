@@ -628,6 +628,19 @@
 /* ── State ─────────────────────────────────────────────────────────────────── */
 const API = '/api/v1';
 const sessionId = crypto.randomUUID();
+
+// Demo API keys — must match the API_KEYS mapping in .env (see .env.example).
+// Swap these for real, secret keys before deploying anywhere beyond local dev.
+const DEMO_KEYS = {
+  requester: 'demo-requester-key',
+  approver:  'demo-approver-key',
+  finance:   'demo-finance-key',
+  admin:     'demo-admin-key',
+};
+function authHeaders() {
+  return { 'X-API-Key': DEMO_KEYS[currentRole] };
+}
+
 let currentRole = 'requester';
 let currentView = 'chat';
 let currentRiskFlags = [];
@@ -653,9 +666,9 @@ async function checkHealth() {
 async function refreshStats() {
   try {
     const [vRes, pRes, iRes] = await Promise.all([
-      fetch(`${API}/vendors`),
-      fetch(`${API}/purchase-orders`),
-      fetch(`${API}/invoices`),
+      fetch(`${API}/vendors`, { headers: authHeaders() }),
+      fetch(`${API}/purchase-orders`, { headers: authHeaders() }),
+      fetch(`${API}/invoices`, { headers: authHeaders() }),
     ]);
     const vendors = await vRes.json();
     const pos     = await pRes.json();
@@ -826,11 +839,10 @@ async function sendMessage() {
   try {
     const res = await fetch(`${API}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
         session_id: sessionId,
         message:    text,
-        role:       currentRole,
       }),
     });
 

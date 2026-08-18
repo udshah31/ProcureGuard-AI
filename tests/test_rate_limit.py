@@ -159,6 +159,9 @@ def test_sweep_does_not_reset_an_active_window():
 # ── HTTP-level: demo server's /chat, which needs no LLM key ──────────────────
 
 
+AUTH_HEADERS = {"X-API-Key": "test-key"}
+
+
 @pytest.fixture
 def demo_client(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
@@ -167,6 +170,7 @@ def demo_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("CHAT_RATE_LIMIT", "3")
     monkeypatch.setenv("CHAT_RATE_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("API_KEYS", "test-key:requester")
 
     import importlib
 
@@ -182,13 +186,15 @@ def test_chat_endpoint_enforces_rate_limit(demo_client):
     for _ in range(3):
         resp = demo_client.post(
             "/api/v1/chat",
-            json={"session_id": "s1", "message": "hello", "role": "requester"},
+            json={"session_id": "s1", "message": "hello"},
+            headers=AUTH_HEADERS,
         )
         assert resp.status_code == 200
 
     resp = demo_client.post(
         "/api/v1/chat",
-        json={"session_id": "s1", "message": "hello", "role": "requester"},
+        json={"session_id": "s1", "message": "hello"},
+        headers=AUTH_HEADERS,
     )
     assert resp.status_code == 429
     assert "Retry-After" in resp.headers
@@ -200,12 +206,14 @@ def test_chat_rate_limit_is_keyed_per_client_not_per_session(demo_client):
     for i in range(3):
         resp = demo_client.post(
             "/api/v1/chat",
-            json={"session_id": f"s{i}", "message": "hello", "role": "requester"},
+            json={"session_id": f"s{i}", "message": "hello"},
+            headers=AUTH_HEADERS,
         )
         assert resp.status_code == 200
 
     resp = demo_client.post(
         "/api/v1/chat",
-        json={"session_id": "s-new", "message": "hello", "role": "requester"},
+        json={"session_id": "s-new", "message": "hello"},
+        headers=AUTH_HEADERS,
     )
     assert resp.status_code == 429

@@ -320,7 +320,27 @@ which marked a model that refuses outright as unsafe.
 | `GET` | `/api/v1/purchase-orders/{po_number}` | Single PO |
 | `GET` | `/api/v1/invoices` | List invoices (`?status=disputed&overdue_only=true`) |
 | `GET` | `/api/v1/invoices/{invoice_number}` | Single invoice |
+| `GET` | `/api/v1/metrics` | Runtime request counters and latency stats |
 | `GET` | `/docs` | Swagger UI |
+
+Every route above except `/health` and `/docs` requires an `X-API-Key`
+header. Keys and their roles are configured via `API_KEYS` in `.env` (see
+`.env.example`); the caller's `role` is resolved from the key server-side —
+it is no longer a field in the `/chat` request body.
+
+```bash
+curl -H "X-API-Key: demo-requester-key" http://localhost:8000/api/v1/vendors
+
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "X-API-Key: demo-requester-key" -H "Content-Type: application/json" \
+  -d '{"session_id": "s1", "message": "Look up vendor Acme Corp"}'
+```
+
+Every response carries an `X-Request-ID` header (reused from the same header
+on the request if the caller sent one). The same ID tags every log line
+written while handling that request — including from inside the LangGraph
+guard/tool nodes — so a single request can be traced end to end by grepping
+for `req=<id>` in the logs.
 
 ---
 
@@ -328,6 +348,7 @@ which marked a model that refuses outright as unsafe.
 
 | Variable | Default | Description |
 |---|---|---|
+| `API_KEYS` | — | Comma-separated `key:role` pairs for `X-API-Key` auth (required to use the API) |
 | `LLM_PROVIDER` | auto-detect | `groq` \| `gemini` \| `ollama` |
 | `LLM_MODEL` | per-provider | Overrides the provider's default model |
 | `GOOGLE_API_KEY` | — | Required for `gemini` — free at aistudio.google.com |
@@ -368,15 +389,14 @@ what's missing matters as much as what's built:
 
 | Limitation | Impact |
 |---|---|
-| **No authentication** | `role` and `approved_by` come from the client, so a caller can claim to be anyone. The segregation-of-duties guard is only as trustworthy as those values — it demonstrates the control, it doesn't enforce identity. |
-| **No rate limiting** | Chat calls the model provider unbounded. |
+| **API-key auth only** | All `/api/v1` routes require an `X-API-Key` header (see `API_KEYS` in `.env.example`), and `role` is now resolved server-side from the key rather than trusted from the request body. `approved_by` on PO approval is still a free-text field, not tied to a verified identity — a caller authenticated as any role can still name anyone as the approver. |
 | **Sessions are in-memory** | Conversation state is lost on restart; a real deployment needs Redis or a persistent store. |
 | **No pagination or indexes** | List endpoints return everything; fine at seed-data scale, not beyond. |
 | **Guard thresholds are global** | `$50k` and the 30-day duplicate window are env vars, not per-org or per-category policy. |
 
-Auth is the one that matters most: with it, `approved_by` would come from a
-verified session rather than the request body, and the SoD guard would become an
-actual control rather than a demonstration of one.
+`approved_by` is the one that matters most now: tying it to the authenticated
+caller's identity (rather than a client-supplied name) would make the
+segregation-of-duties guard a real control instead of a partial one.
 
 ---
 

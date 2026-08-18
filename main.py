@@ -35,14 +35,11 @@ from agent.llm import build_llm, describe as describe_llm, message_text
 from agent.state import AgentState
 from agent.tools import TOOLS, TOOL_MAP
 from agent.guard_rules import run_all_guards, format_guard_summary
+from observability import configure_logging, metrics
 
 # ── Initialise environment ────────────────────────────────────────────────────
 load_dotenv()
-
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+configure_logging()
 log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -165,6 +162,7 @@ def tool_node(state: AgentState) -> dict:
                 # with better arguments; raising here would kill the whole turn.
                 result = f"Tool '{tc['name']}' failed: {type(exc).__name__}: {exc}"
                 log.warning("Tool '%s' raised: %s", tc["name"], exc)
+                metrics.increment(f"tool_error_total:{tc['name']}")
 
         tool_messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         log.info("Tool '%s' → %s", tc["name"], str(result)[:120])
@@ -195,6 +193,11 @@ def guard_node(state: AgentState) -> dict:
 
         # Collect risk flags for state
         risk_flags.extend(r.message for r in results if not r.passed)
+
+        for r in blocks:
+            metrics.increment(f"guard_block_total:{r.check}")
+        for r in warns:
+            metrics.increment(f"guard_warn_total:{r.check}")
 
         if blocks:
             # Hard block — do not call the tool, inject failure message

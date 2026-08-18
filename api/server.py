@@ -25,21 +25,20 @@ import sqlite3
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from api.auth import require_api_key
+from api.middleware import RequestContextMiddleware
 from api.rate_limit import RateLimiter
 from api.sessions import SessionStore
-from api.routers import chat, vendors, purchase_orders, invoices
+from api.routers import chat, vendors, purchase_orders, invoices, observability as observability_router
+from observability import configure_logging
 
 load_dotenv()
-
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+configure_logging()
 log = logging.getLogger(__name__)
 
 DB_PATH:        str = os.getenv("DB_PATH",    "data/procurement.db")
@@ -133,12 +132,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Added after CORS so it ends up outermost — every request gets a request_id
+# (and every downstream log line, including from inside graph.invoke, picks
+# it up via observability.request_id_var) before CORS or routing runs.
+app.add_middleware(RequestContextMiddleware)
+
 # ── Routers ───────────────────────────────────────────────────────────────────
 PREFIX = "/api/v1"
-app.include_router(chat.router,           prefix=PREFIX, tags=["Chat"])
-app.include_router(vendors.router,        prefix=PREFIX, tags=["Vendors"])
-app.include_router(purchase_orders.router,prefix=PREFIX, tags=["Purchase Orders"])
-app.include_router(invoices.router,       prefix=PREFIX, tags=["Invoices"])
+app.include_router(chat.router,              prefix=PREFIX, tags=["Chat"])
+app.include_router(vendors.router,           prefix=PREFIX, tags=["Vendors"],
+                    dependencies=[Depends(require_api_key)])
+app.include_router(purchase_orders.router,   prefix=PREFIX, tags=["Purchase Orders"],
+                    dependencies=[Depends(require_api_key)])
+app.include_router(invoices.router,          prefix=PREFIX, tags=["Invoices"],
+                    dependencies=[Depends(require_api_key)])
+app.include_router(observability_router.router, prefix=PREFIX, tags=["Observability"],
+                    dependencies=[Depends(require_api_key)])
 
 
 # ── Static UI files ──────────────────────────────────────────────────────────

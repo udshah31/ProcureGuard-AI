@@ -8,10 +8,11 @@ GET  /api/v1/health — Liveness check.
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.llm import message_text
+from api.auth import require_api_key
 from api.models import ChatRequest, ChatResponse, HealthResponse
 from observability import Timer, metrics
 
@@ -31,13 +32,15 @@ def _extract_tool_calls(messages: list) -> list[str]:
 
 
 @router.post("/chat", response_model=ChatResponse, summary="Send a message to the agent")
-def chat(request: Request, body: ChatRequest) -> ChatResponse:
+def chat(request: Request, body: ChatRequest, role: str = Depends(require_api_key)) -> ChatResponse:
     """
     Send a message to ProcureGuard AI and receive a response.
 
+    Requires an `X-API-Key` header — the caller's role is resolved from the
+    key server-side (see api/auth.py), not from the request body.
+
     - **session_id**: Unique ID to maintain conversation history across calls.
     - **message**: Your question or command in natural language.
-    - **role**: Your role (`requester`, `approver`, `finance`, `admin`).
 
     The agent will use the appropriate tools, enforce compliance guard rules,
     and return a structured response including any risk flags raised.
@@ -68,7 +71,7 @@ def chat(request: Request, body: ChatRequest) -> ChatResponse:
         )
 
     # Get or create session state
-    state = session_store.get_or_create(body.session_id, role=body.role)
+    state = session_store.get_or_create(body.session_id, role=role)
 
     # Track message count before invocation (to extract new messages only)
     prev_count = len(state["messages"])
@@ -107,7 +110,7 @@ def chat(request: Request, body: ChatRequest) -> ChatResponse:
 
     log.info(
         "Chat [session=%s role=%s tools=%s flags=%d] → %d chars reply",
-        body.session_id, body.role, tool_calls_made, len(risk_flags), len(reply),
+        body.session_id, role, tool_calls_made, len(risk_flags), len(reply),
     )
 
     return ChatResponse(
