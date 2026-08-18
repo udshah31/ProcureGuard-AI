@@ -348,7 +348,7 @@ for `req=<id>` in the logs.
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_KEYS` | — | Comma-separated `key:role` pairs for `X-API-Key` auth (required to use the API) |
+| `API_KEYS` | — | Comma-separated `key:role[:identity]` entries for `X-API-Key` auth (required to use the API) — `identity` is recorded as `approved_by` and defaults to `<role>@procureguard.local` |
 | `LLM_PROVIDER` | auto-detect | `groq` \| `gemini` \| `ollama` |
 | `LLM_MODEL` | per-provider | Overrides the provider's default model |
 | `GOOGLE_API_KEY` | — | Required for `gemini` — free at aistudio.google.com |
@@ -389,14 +389,14 @@ what's missing matters as much as what's built:
 
 | Limitation | Impact |
 |---|---|
-| **API-key auth only** | All `/api/v1` routes require an `X-API-Key` header (see `API_KEYS` in `.env.example`), and `role` is now resolved server-side from the key rather than trusted from the request body. `approved_by` on PO approval is still a free-text field, not tied to a verified identity — a caller authenticated as any role can still name anyone as the approver. |
+| **API-key auth, single tenant** | All `/api/v1` routes require an `X-API-Key` header (see `API_KEYS` in `.env.example`); `role` and `approved_by`/identity are both resolved server-side from the key — a client can no longer claim to be anyone. Fine for a handful of shared demo keys, not for per-user accounts, key rotation, or issuing/revoking without a redeploy. |
 | **Sessions are in-memory** | Conversation state is lost on restart; a real deployment needs Redis or a persistent store. |
 | **No pagination or indexes** | List endpoints return everything; fine at seed-data scale, not beyond. |
 | **Guard thresholds are global** | `$50k` and the 30-day duplicate window are env vars, not per-org or per-category policy. |
 
-`approved_by` is the one that matters most now: tying it to the authenticated
-caller's identity (rather than a client-supplied name) would make the
-segregation-of-duties guard a real control instead of a partial one.
+Real per-user accounts (rather than shared role keys) is the one that matters
+most now: it would let the segregation-of-duties guard distinguish
+individuals within a role, not just roles from each other.
 
 ---
 

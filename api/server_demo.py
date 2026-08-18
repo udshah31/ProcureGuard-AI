@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent.guard_rules import format_guard_summary, run_all_guards
-from api.auth import require_api_key
+from api.auth import AuthContext, require_api_key
 from api.middleware import RequestContextMiddleware
 from api.rate_limit import RateLimiter
 from api.sessions import SessionStore
@@ -65,7 +65,7 @@ def _write_audit(conn, entity_type, entity_id, action, actor, details):
     )
 
 
-def mock_agent(message: str, role: str) -> tuple[str, list[str], list[str]]:
+def mock_agent(message: str, role: str, identity: str) -> tuple[str, list[str], list[str]]:
     """
     Returns (reply, tool_calls_made, risk_flags).
     Routes to real DB operations based on message keywords.
@@ -148,8 +148,10 @@ def mock_agent(message: str, role: str) -> tuple[str, list[str], list[str]]:
     if "approve" in msg and ("po-" in msg or "purchase order" in msg):
         po_match = re.search(r"po-\d+", msg)
         po_num = po_match.group(0).upper() if po_match else None
-        by_match = re.search(r"(?:for|by|approved_by[=:]?)\s*([\w.@]+)", msg)
-        approved_by = by_match.group(1) if by_match else role + "@company.com"
+        # approved_by is always the authenticated caller's identity — never
+        # taken from the message text, or a caller could name anyone as the
+        # approver and walk past the self-approval guard.
+        approved_by = identity
         tools.append("approve_purchase_order")
 
         if not po_num:
@@ -422,7 +424,7 @@ from fastapi import APIRouter
 _chat = APIRouter()
 
 @_chat.post("/chat", response_model=ChatResponse)
-def chat(request: Request, body: ChatRequest, role: str = Depends(require_api_key)) -> ChatResponse:
+def chat(request: Request, body: ChatRequest, auth: AuthContext = Depends(require_api_key)) -> ChatResponse:
     client_key = request.client.host if request.client else "unknown"
     allowed, retry_after = request.app.state.chat_rate_limiter.check(client_key)
     if not allowed:
@@ -435,9 +437,9 @@ def chat(request: Request, body: ChatRequest, role: str = Depends(require_api_ke
 
     metrics.increment("chat_requests_total")
     store = request.app.state.session_store
-    store.get_or_create(body.session_id, role=role)
-    reply, tool_calls, risk_flags = mock_agent(body.message, role)
-    store.update(body.session_id, {"messages": [], "role": role,
+    store.get_or_create(body.session_id, role=auth.role, identity=auth.identity)
+    reply, tool_calls, risk_flags = mock_agent(body.message, auth.role, auth.identity)
+    store.update(body.session_id, {"messages": [], "role": auth.role, "identity": auth.identity,
                                     "context": {}, "risk_flags": risk_flags})
     log.info("Chat [%s] tools=%s → %d chars", body.session_id, tool_calls, len(reply))
     return ChatResponse(session_id=body.session_id, reply=reply,

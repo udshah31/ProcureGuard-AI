@@ -33,7 +33,7 @@ class SessionStore:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def get_or_create(self, session_id: str, role: str = "requester") -> dict:
+    def get_or_create(self, session_id: str, role: str = "requester", identity: str = "") -> dict:
         """
         Return the existing AgentState for session_id, or create a fresh one.
         Refreshes the TTL on access.
@@ -51,6 +51,7 @@ class SessionStore:
             state: dict = {
                 "messages": [],
                 "role": role,
+                "identity": identity,
                 "context": {},
                 "risk_flags": [],
             }

@@ -184,8 +184,15 @@ def guard_node(state: AgentState) -> dict:
         if tc["name"] != "approve_purchase_order":
             continue
 
-        po_number = tc["args"].get("po_number", "")
-        results = run_all_guards(po_number, approved_by=tc["args"].get("approved_by"))
+        # approved_by is always the authenticated caller's identity, never
+        # whatever the LLM put in the tool call — otherwise a user could ask
+        # the agent to "approve this as someone-else@company.com" and walk
+        # straight past the self-approval guard.
+        args = dict(tc["args"])
+        args["approved_by"] = state.get("identity", "")
+
+        po_number = args.get("po_number", "")
+        results = run_all_guards(po_number, approved_by=args.get("approved_by"))
         summary = format_guard_summary(results)
 
         blocks = [r for r in results if not r.passed and r.severity == "block"]
@@ -212,7 +219,7 @@ def guard_node(state: AgentState) -> dict:
         else:
             # No blocks — actually execute the approval tool
             tool_fn = TOOL_MAP["approve_purchase_order"]
-            result = tool_fn.invoke(tc["args"])
+            result = tool_fn.invoke(args)
 
             suffix = f"\n\n{summary}" if warns else ""
             tool_messages.append(
@@ -299,6 +306,7 @@ def main() -> None:
     state: AgentState = {
         "messages": [],
         "role": "requester",
+        "identity": "cli-user@procureguard.local",
         "context": {},
         "risk_flags": [],
     }

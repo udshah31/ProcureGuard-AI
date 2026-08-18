@@ -43,10 +43,11 @@ def tool_call_message(name: str, args: dict, call_id: str = "call_1") -> AIMessa
     )
 
 
-def initial_state(text: str, role: str = "approver") -> dict:
+def initial_state(text: str, role: str = "approver", identity: str = "approver@company.com") -> dict:
     return {
         "messages": [HumanMessage(content=text)],
         "role": role,
+        "identity": identity,
         "context": {},
         "risk_flags": [],
     }
@@ -188,13 +189,37 @@ def test_clean_approval_updates_the_po(db, make_vendor, make_po):
             )
         ]
     )
-    build_graph(llm).invoke(initial_state("Approve PO-OK"))
+    build_graph(llm).invoke(initial_state("Approve PO-OK", identity="approver@company.com"))
 
     row = db.execute(
         "SELECT status, approved_by FROM purchase_orders WHERE po_number = 'PO-OK'"
     ).fetchone()
     assert row["status"] == "approved"
-    assert row["approved_by"] == "manager@company.com"
+    assert row["approved_by"] == "approver@company.com"
+
+
+def test_approved_by_ignores_a_spoofed_tool_call_argument(db, make_vendor, make_po):
+    """guard_node must always use the authenticated caller's identity, never
+    whatever approved_by value the LLM put in the tool call — otherwise a
+    user could ask the agent to approve "as" someone else and bypass the
+    self-approval guard."""
+    vendor_id = make_vendor("Acme Corp")
+    make_po("PO-SPOOF", vendor_id, amount=5_000.0, status="pending", created_at=None)
+
+    llm = FakeLLM(
+        [
+            tool_call_message(
+                "approve_purchase_order",
+                {"po_number": "PO-SPOOF", "approved_by": "someone-else@company.com"},
+            )
+        ]
+    )
+    build_graph(llm).invoke(initial_state("Approve PO-SPOOF", identity="real-caller@company.com"))
+
+    row = db.execute(
+        "SELECT approved_by FROM purchase_orders WHERE po_number = 'PO-SPOOF'"
+    ).fetchone()
+    assert row["approved_by"] == "real-caller@company.com"
 
 
 def test_over_threshold_po_is_approved_but_carries_a_warning(db, make_vendor, make_po):

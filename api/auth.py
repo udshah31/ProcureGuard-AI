@@ -1,19 +1,23 @@
 """
 api/auth.py
 ────────────
-Minimal API-key auth. Each key maps to a role (requester | approver |
-finance | admin) via the API_KEYS env var:
+Minimal API-key auth. Each key maps to a role, and optionally an identity
+(the string recorded as approved_by/actor on writes), via the API_KEYS env
+var:
 
-    API_KEYS="key1:requester,key2:approver,key3:finance,key4:admin"
+    API_KEYS="key1:requester:alice@company.com,key2:approver:bob@company.com"
 
-Callers send the key in the X-API-Key header. The resolved role is the
-authoritative source of truth for the caller's role — client-supplied
-role fields in request bodies (e.g. ChatRequest.role) are no longer
-trusted; see api/routers/chat.py.
+Identity may be omitted (key:role) and defaults to "<role>@procureguard.local".
+
+Callers send the key in the X-API-Key header. The resolved AuthContext is
+the authoritative source of truth for the caller's role and identity —
+client-supplied role/approved_by fields are no longer trusted; see
+api/routers/chat.py and main.py's guard_node.
 """
 
 import logging
 import os
+from dataclasses import dataclass
 
 from fastapi import Header, HTTPException
 
@@ -22,25 +26,32 @@ log = logging.getLogger(__name__)
 VALID_ROLES = {"requester", "approver", "finance", "admin"}
 
 
-def _parse_api_keys(raw: str) -> dict[str, str]:
-    keys: dict[str, str] = {}
-    for pair in raw.split(","):
-        pair = pair.strip()
-        if not pair:
+@dataclass(frozen=True)
+class AuthContext:
+    role: str
+    identity: str
+
+
+def _parse_api_keys(raw: str) -> dict[str, AuthContext]:
+    keys: dict[str, AuthContext] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
             continue
-        if ":" not in pair:
-            log.warning("Ignoring malformed API_KEYS entry (expected key:role).")
+        parts = entry.split(":", 2)
+        if len(parts) < 2:
+            log.warning("Ignoring malformed API_KEYS entry (expected key:role[:identity]).")
             continue
-        key, _, role = pair.partition(":")
-        key, role = key.strip(), role.strip()
+        key, role = parts[0].strip(), parts[1].strip()
+        identity = parts[2].strip() if len(parts) == 3 else ""
         if not key or role not in VALID_ROLES:
-            log.warning("Ignoring malformed API_KEYS entry (expected key:role).")
+            log.warning("Ignoring malformed API_KEYS entry (expected key:role[:identity]).")
             continue
-        keys[key] = role
+        keys[key] = AuthContext(role=role, identity=identity or f"{role}@procureguard.local")
     return keys
 
 
-def _api_keys() -> dict[str, str]:
+def _api_keys() -> dict[str, AuthContext]:
     # Parsed fresh per call (cheap) rather than cached at import time, so it
     # always reflects the current API_KEYS env var — tests set/change it per
     # case, and a module-level constant would freeze whatever value was set
@@ -48,8 +59,8 @@ def _api_keys() -> dict[str, str]:
     return _parse_api_keys(os.getenv("API_KEYS", ""))
 
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> str:
-    """FastAPI dependency: validates X-API-Key and returns the caller's role."""
+def require_api_key(x_api_key: str | None = Header(default=None)) -> AuthContext:
+    """FastAPI dependency: validates X-API-Key and returns the caller's AuthContext."""
     keys = _api_keys()
     if not keys:
         raise HTTPException(

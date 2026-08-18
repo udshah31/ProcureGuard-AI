@@ -169,6 +169,7 @@ def run_case(case: EvalCase, graph, db_path: str) -> CaseResult:
             {
                 "messages": [HumanMessage(content=case.prompt)],
                 "role": case.role,
+                "identity": case.identity,
                 "context": {},
                 "risk_flags": [],
             }

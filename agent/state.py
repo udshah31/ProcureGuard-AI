@@ -6,6 +6,9 @@ Defines the shared AgentState for the ProcureGuard LangGraph.
 Fields:
     messages    – full conversation history (append-only via add_messages)
     role        – the requesting user's role (requester | approver | finance)
+    identity    – the authenticated caller's identity (e.g. "bob@company.com"),
+                  resolved from their API key — guard_node uses this as the
+                  authoritative approved_by, not whatever the LLM proposes
     context     – structured facts extracted mid-conversation
                   e.g. {"po_number": "PO-001", "vendor": "Acme", "amount": 75000}
     risk_flags  – compliance warnings accumulated during the session
@@ -25,5 +28,6 @@ class AgentState(TypedDict):
 
     # ── Session context ───────────────────────────────────────────────────────
     role: str                   # "requester" | "approver" | "finance" | "admin"
+    identity: str                # authenticated caller's identity (approved_by source)
     context: dict               # structured facts extracted during the session
     risk_flags: list[str]       # compliance warnings accumulated this session
