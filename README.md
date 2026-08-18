@@ -337,6 +337,8 @@ which marked a model that refuses outright as unsafe.
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `MAX_NEW_TOKENS` | `512` | Max tokens per agent response |
 | `LLM_TEMPERATURE` | `0.1` | Sampling temperature |
+| `CHAT_RATE_LIMIT` | `20` | Max `/api/v1/chat` requests per client per window |
+| `CHAT_RATE_WINDOW_SECONDS` | `60` | Window size for `CHAT_RATE_LIMIT` |
 
 ---
 

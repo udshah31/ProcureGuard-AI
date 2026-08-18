@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent.guard_rules import format_guard_summary, run_all_guards
+from api.rate_limit import RateLimiter
 from api.sessions import SessionStore
 from api.models import ChatRequest, ChatResponse, HealthResponse
 from api.routers import vendors, purchase_orders, invoices
@@ -42,6 +43,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 DB_PATH: str = os.getenv("DB_PATH", "data/procurement.db")
+
+CHAT_RATE_LIMIT:  int = int(os.getenv("CHAT_RATE_LIMIT", "20"))
+CHAT_RATE_WINDOW: int = int(os.getenv("CHAT_RATE_WINDOW_SECONDS", "60"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -374,9 +378,10 @@ async def lifespan(app: FastAPI):
         seed(DB_PATH)
         log.info("DB seeded.")
 
-    app.state.session_store = SessionStore()
-    app.state.model_name    = "demo-mode (no LLM)"
-    app.state.db_path       = DB_PATH
+    app.state.session_store     = SessionStore()
+    app.state.chat_rate_limiter = RateLimiter(CHAT_RATE_LIMIT, CHAT_RATE_WINDOW)
+    app.state.model_name        = "demo-mode (no LLM)"
+    app.state.db_path           = DB_PATH
     log.info("Demo mode ready — no LLM loaded.")
     yield
     log.info("Shutting down.")
@@ -413,6 +418,15 @@ _chat = APIRouter()
 
 @_chat.post("/chat", response_model=ChatResponse)
 def chat(request: Request, body: ChatRequest) -> ChatResponse:
+    client_key = request.client.host if request.client else "unknown"
+    allowed, retry_after = request.app.state.chat_rate_limiter.check(client_key)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Please slow down and try again shortly.",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
+
     store = request.app.state.session_store
     store.get_or_create(body.session_id, role=body.role)
     reply, tool_calls, risk_flags = mock_agent(body.message, body.role)

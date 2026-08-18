@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from api.rate_limit import RateLimiter
 from api.sessions import SessionStore
 from api.routers import chat, vendors, purchase_orders, invoices
 
@@ -43,6 +44,9 @@ log = logging.getLogger(__name__)
 
 DB_PATH:        str = os.getenv("DB_PATH",    "data/procurement.db")
 MAX_NEW_TOKENS: int = int(os.getenv("MAX_NEW_TOKENS", "512"))
+
+CHAT_RATE_LIMIT:  int = int(os.getenv("CHAT_RATE_LIMIT", "20"))
+CHAT_RATE_WINDOW: int = int(os.getenv("CHAT_RATE_WINDOW_SECONDS", "60"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -86,11 +90,16 @@ async def lifespan(app: FastAPI):
     # 5. Session store
     session_store = SessionStore()
 
+    # 6. Rate limiter for /chat (the only endpoint that calls the LLM)
+    chat_rate_limiter = RateLimiter(CHAT_RATE_LIMIT, CHAT_RATE_WINDOW)
+    log.info("Chat rate limit: %d requests / %ds per client.", CHAT_RATE_LIMIT, CHAT_RATE_WINDOW)
+
     # Attach to app.state for router access
-    app.state.graph         = graph
-    app.state.session_store = session_store
-    app.state.model_name    = model_name
-    app.state.db_path       = DB_PATH
+    app.state.graph             = graph
+    app.state.session_store     = session_store
+    app.state.chat_rate_limiter = chat_rate_limiter
+    app.state.model_name        = model_name
+    app.state.db_path           = DB_PATH
 
     yield  # ← server runs here
 

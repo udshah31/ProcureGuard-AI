@@ -44,8 +44,20 @@ def chat(request: Request, body: ChatRequest) -> ChatResponse:
     The agent will use the appropriate tools, enforce compliance guard rules,
     and return a structured response including any risk flags raised.
     """
-    graph:         Any = request.app.state.graph
-    session_store: Any = request.app.state.session_store
+    graph:            Any = request.app.state.graph
+    session_store:    Any = request.app.state.session_store
+    chat_rate_limiter: Any = request.app.state.chat_rate_limiter
+
+    # Rate-limited per client address — there's no real auth yet, so
+    # session_id/role are self-reported and not usable as a limiter key.
+    client_key = request.client.host if request.client else "unknown"
+    allowed, retry_after = chat_rate_limiter.check(client_key)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Please slow down and try again shortly.",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
 
     if graph is None:
         raise HTTPException(
