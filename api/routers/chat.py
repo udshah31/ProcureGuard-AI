@@ -9,10 +9,11 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Request, HTTPException
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.llm import message_text
 from api.models import ChatRequest, ChatResponse, HealthResponse
+from observability import Timer, metrics
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,9 +23,6 @@ def _extract_tool_calls(messages: list) -> list[str]:
     """Return tool names invoked in this conversation turn."""
     names: list[str] = []
     for msg in messages:
-        if isinstance(msg, ToolMessage):
-            # Walk back to find the AIMessage that triggered this tool
-            pass
         if isinstance(msg, AIMessage):
             for tc in getattr(msg, "tool_calls", []):
                 if tc["name"] not in names:
@@ -53,6 +51,7 @@ def chat(request: Request, body: ChatRequest) -> ChatResponse:
     client_key = request.client.host if request.client else "unknown"
     allowed, retry_after = chat_rate_limiter.check(client_key)
     if not allowed:
+        metrics.increment("chat_rate_limited_total")
         raise HTTPException(
             status_code=429,
             detail="Rate limit exceeded. Please slow down and try again shortly.",
@@ -77,9 +76,13 @@ def chat(request: Request, body: ChatRequest) -> ChatResponse:
     # Append new user message and invoke graph
     state["messages"] = list(state["messages"]) + [HumanMessage(content=body.message)]
 
+    metrics.increment("chat_requests_total")
     try:
-        state = graph.invoke(state)
+        with Timer() as t:
+            state = graph.invoke(state)
+        metrics.record_latency("chat_agent_invoke", t.elapsed)
     except Exception as exc:
+        metrics.increment("chat_errors_total")
         log.exception("Agent invocation failed for session '%s'.", body.session_id)
         raise HTTPException(status_code=500, detail=f"Agent error: {str(exc)}")
 
