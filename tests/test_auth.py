@@ -145,6 +145,34 @@ def test_health_stays_open(demo_client):
     assert resp.status_code == 200
 
 
+def test_requested_by_comes_from_the_authenticated_identity(demo_client):
+    """Creating a PO must record the authenticated caller's identity as
+    requested_by, not a generic role-derived placeholder."""
+    import sqlite3
+
+    import api.server_demo as server_demo
+
+    db_path = server_demo.DB_PATH
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("INSERT INTO vendors (name, status) VALUES ('Acme', 'active')")
+        conn.commit()
+
+    resp = demo_client.post(
+        "/api/v1/chat",
+        json={"session_id": "s1", "message": "create po for Acme $1000"},
+        headers=AUTH_HEADERS,  # "test-key" -> requester@procureguard.local
+    )
+    assert resp.status_code == 200
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT requested_by FROM purchase_orders WHERE status='draft' "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "requester@procureguard.local"
+
+
 def test_approved_by_comes_from_the_authenticated_identity_not_the_message(demo_client, tmp_path, monkeypatch):
     """A caller cannot claim to be a different approver by naming one in the
     chat message — approved_by must always be the authenticated identity."""

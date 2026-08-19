@@ -256,7 +256,7 @@ def mock_agent(message: str, role: str, identity: str) -> tuple[str, list[str], 
                 return f"Vendor '{vname}' not found. Register them first.", tools, flags
             conn.execute(
                 "INSERT INTO purchase_orders (po_number,vendor_id,description,amount,requested_by,status) VALUES (?,?,?,?,?,'draft')",
-                (po_num, v["id"], message[:80], amount, role+"@company.com"),
+                (po_num, v["id"], message[:80], amount, identity),
             )
             conn.commit()
         flags_out = []

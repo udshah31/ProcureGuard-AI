@@ -151,12 +151,19 @@ def tool_node(state: AgentState) -> dict:
             # Guard node handles this — should not reach here
             continue
 
+        args = _coerce_tool_args(tc["args"], tc["name"])
+        if tc["name"] == "create_purchase_order":
+            # requested_by is always the authenticated caller's identity,
+            # never whatever the LLM put in the tool call — otherwise a user
+            # could ask the agent to raise a PO "requested by" someone else.
+            args["requested_by"] = state.get("identity", "")
+
         tool_fn = TOOL_MAP.get(tc["name"])
         if tool_fn is None:
             result = f"Unknown tool: {tc['name']}"
         else:
             try:
-                result = tool_fn.invoke(_coerce_tool_args(tc["args"], tc["name"]))
+                result = tool_fn.invoke(args)
             except Exception as exc:
                 # Hand the failure back as an observation so the agent can retry
                 # with better arguments; raising here would kill the whole turn.

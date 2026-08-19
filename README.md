@@ -348,7 +348,7 @@ for `req=<id>` in the logs.
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_KEYS` | — | Comma-separated `key:role[:identity]` entries for `X-API-Key` auth (required to use the API) — `identity` is recorded as `approved_by` and defaults to `<role>@procureguard.local` |
+| `API_KEYS` | — | Comma-separated `key:role[:identity]` entries for `X-API-Key` auth (required to use the API) — `identity` is recorded as `approved_by`/`requested_by` and defaults to `<role>@procureguard.local` |
 | `LLM_PROVIDER` | auto-detect | `groq` \| `gemini` \| `ollama` |
 | `LLM_MODEL` | per-provider | Overrides the provider's default model |
 | `GOOGLE_API_KEY` | — | Required for `gemini` — free at aistudio.google.com |
@@ -389,7 +389,7 @@ what's missing matters as much as what's built:
 
 | Limitation | Impact |
 |---|---|
-| **API-key auth, single tenant** | All `/api/v1` routes require an `X-API-Key` header (see `API_KEYS` in `.env.example`); `role` and `approved_by`/identity are both resolved server-side from the key — a client can no longer claim to be anyone. Fine for a handful of shared demo keys, not for per-user accounts, key rotation, or issuing/revoking without a redeploy. |
+| **API-key auth, single tenant** | All `/api/v1` routes require an `X-API-Key` header (see `API_KEYS` in `.env.example`); `role`, `approved_by`, and `requested_by` are all resolved server-side from the key — a client can no longer claim to be anyone. Fine for a handful of shared demo keys, not for per-user accounts, key rotation, or issuing/revoking without a redeploy. |
 | **Sessions are in-memory** | Conversation state is lost on restart; a real deployment needs Redis or a persistent store. |
 | **No pagination or indexes** | List endpoints return everything; fine at seed-data scale, not beyond. |
 | **Guard thresholds are global** | `$50k` and the 30-day duplicate window are env vars, not per-org or per-category policy. |

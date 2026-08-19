@@ -131,6 +131,36 @@ def test_numeric_identifier_survives_a_full_tool_call(db, make_vendor, make_po):
     assert not any("ValidationError" in out for out in tool_outputs(result))
 
 
+def test_requested_by_ignores_a_spoofed_tool_call_argument(db, make_vendor):
+    """tool_node must always use the authenticated caller's identity for
+    requested_by, never whatever the LLM put in the tool call — otherwise a
+    user could ask the agent to raise a PO "on behalf of" someone else."""
+    make_vendor("Acme Corp")
+
+    llm = FakeLLM(
+        [
+            tool_call_message(
+                "create_purchase_order",
+                {
+                    "vendor_name": "Acme Corp",
+                    "description": "Spoof test",
+                    "amount": 1000.0,
+                    "requested_by": "someone-else@company.com",
+                },
+            ),
+            AIMessage(content="Created."),
+        ]
+    )
+    build_graph(llm).invoke(
+        initial_state("Create a PO for Acme Corp", identity="real-caller@company.com")
+    )
+
+    row = db.execute(
+        "SELECT requested_by FROM purchase_orders WHERE description = 'Spoof test'"
+    ).fetchone()
+    assert row["requested_by"] == "real-caller@company.com"
+
+
 def test_a_failing_tool_is_reported_not_raised(db):
     """One bad argument should cost a turn, not the conversation."""
     llm = FakeLLM(
